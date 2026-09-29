@@ -1,4 +1,4 @@
-## Non-Profit M68k Hybrid Services for <br>
-## M68k Amiga and Atari Computers<br>
+## Non-Profit ARM64 Hybrid Services for M68k:
+For Amiga and Atari Computers<br>
 <br>
-In development.
+In development.<br>
