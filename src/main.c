@@ -218,6 +218,8 @@ int main(int argc, char **argv)
     int fallback_told = 0;
     la64m68_memory *vblk_regs = NULL;
     la64m68_memory *rom_mem  = NULL;
+    la64m68_memory *fast_ram = NULL;
+    la64m68_memory *rom_tos  = NULL;
     la64m68_vfs    vfs;
     la64m68_memory *vfs_regs = NULL;
     fb_glue         glue      = { NULL, NULL, 0, 0, NULL };
@@ -264,18 +266,45 @@ int main(int argc, char **argv)
     }
 
     /* Address space: RAM + device register windows via the router. */
+    /* ---- guest memory -------------------------------------------------
+     * Chip RAM at 0 is what the chipset DMAs from: Bitplanes, blitter and
+     * disk all live here, so a playfield must be placed in it. Fast RAM sits
+     * higher and is free of that constraint.
+     *
+     * The device windows below lie INSIDE the chip range and shadow it --
+     * the router resolves overlaps newest-first, so a device always wins.
+     * That is why a 16 MiB chip area is "16 MiB minus the windows" rather
+     * than a flat block. */
     rt  = la64m68_router_create();
-    ram = la64m68_ram_memory_create(0x00000000, (size_t)o.ram_kb * 1024);
-    if (!rt || !ram) {
-        fprintf(stderr, "la64m68: failed to create memory\n");
+    if (!rt) {
+        fprintf(stderr, "la64m68: failed to create the router\n");
         rc = 1;
         goto out;
     }
-    if (route(rt, 0x00000000, (uint32_t)((size_t)o.ram_kb * 1024), ram,
-              "ram") != 0) {
+    size_t chip_bytes = (size_t)o.chip_kb * 1024;
+    size_t fast_bytes = (size_t)o.fast_kb * 1024;
+    ram = la64m68_ram_memory_create(0x00000000, chip_bytes);
+    if (!ram) {
+        fprintf(stderr, "la64m68: cannot create Chip RAM\n");
         rc = 1;
         goto out;
     }
+    if (route(rt, 0x00000000, (uint32_t)chip_bytes, ram, "chip ram") != 0) {
+        rc = 1;
+        goto out;
+    }
+    if (fast_bytes) {
+        fast_ram = la64m68_ram_memory_create(0x01000000u, fast_bytes);
+        if (!fast_ram ||
+            route(rt, 0x01000000u, (uint32_t)fast_bytes, fast_ram,
+                  "fast ram") != 0) {
+            fprintf(stderr, "la64m68: cannot create Fast RAM\n");
+            rc = 1;
+            goto out;
+        }
+    }
+    fprintf(stderr, "la64m68: chip=%lu KiB @00000000, fast=%lu KiB @01000000\n",
+            (unsigned long)o.chip_kb, (unsigned long)o.fast_kb);
 
     /* PiS passthrough first: real Amiga HW wins over every v-device.
      *
@@ -409,9 +438,19 @@ int main(int argc, char **argv)
      * a routed region there the loader writes into nothing and every vector
      * reads back zero -- which looks like a bad ROM instead of a missing
      * window. 2 MiB covers every standard base. */
-    rom_mem = la64m68_ram_memory_create(0x00E00000u, 0x200000u);
-    if (!rom_mem || route(rt, 0x00E00000u, 0x200000u, rom_mem, "rom space") != 0) {
-        fprintf(stderr, "la64m68: cannot create the ROM window\n");
+    /* ROM windows at the two documented bases, sized to what the map
+     * actually allows. A blanket 0xE00000-0xFFFFFF used to swallow the
+     * device registers at 0xF30000 and shadow them.
+     *   0xE00000..0xE7FFFF  Atari TOS (512 KiB)
+     *   0xF80000..0xFFFFFF  Amiga Kickstart (512 KiB)
+     * The Kickstart window is mirrored over 0xF00000 so 512 KiB images that
+     * decode lower are reachable too. */
+    rom_mem = la64m68_ram_memory_create(0x00F00000u, 0x100000u);
+    rom_tos = la64m68_ram_memory_create(0x00E00000u, 0x80000u);
+    if (!rom_mem || !rom_tos ||
+        route(rt, 0x00F00000u, 0x100000u, rom_mem, "kickstart window") != 0 ||
+        route(rt, 0x00E00000u, 0x80000u, rom_tos, "tos window") != 0) {
+        fprintf(stderr, "la64m68: cannot create the ROM windows\n");
         rc = 1;
         goto out;
     }
@@ -420,7 +459,7 @@ int main(int argc, char **argv)
      * brings its own vector table and must be the last writer. Placing these
      * afterwards overwrote the Kickstart entry point and sent the CPU to
      * 0x00000800 -- inside RAM -- from where it executed open bus forever. */
-    la64m68_mem_write32(rt, 0x00000000, (uint32_t)o.ram_kb * 1024);
+    la64m68_mem_write32(rt, 0x00000000, (uint32_t)o.chip_kb * 1024);
     la64m68_mem_write32(rt, 0x00000004, 0x00000800);
 
     /* ROM images: --kickstart / --tos place themselves at the documented
@@ -569,6 +608,8 @@ out:
     if (vregs[1]) la64m68_vnic_regs_destroy(vregs[1]);
     if (vregs[2]) la64m68_vhid_regs_destroy(vregs[2]);
     la64m68_ram_memory_destroy(rom_mem);
+    la64m68_ram_memory_destroy(rom_tos);
+    la64m68_ram_memory_destroy(fast_ram);
     if (vblk_regs) {
         la64m68_vblk_regs_destroy(vblk_regs);
         la64m68_vblk_src_close(&vblk.src);

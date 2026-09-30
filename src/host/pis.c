@@ -532,11 +532,11 @@ int la64m68_pis_ipl_level(la64m68_pis *p)
 {
     if (!p || !p->present)
         return 0;
-    /* IPL2..0 are active-low and carry the level in binary: level 7 (no
-     * interrupt) drives all three high, level 4 drives 0b100. Reading the
-     * lines as a number therefore yields the level directly -- inverting
-     * them would map level 4 to 3. */
-    return (int)(*p->gplev & 7u);
+    /* IPL2..0 are ACTIVE-LOW. All three high means "no interrupt", not
+     * level 7 -- reading the lines as a plain number turned every floating
+     * or idle state into a permanent NMI (vector 31) and the core ran away.
+     * The level is the inverted line state. */
+    return (int)((~*p->gplev) & 7u);
 }
 
 static void free_win(la64m68_memory *m)

@@ -581,15 +581,26 @@ static void test_hardening(void)
         la64m68_opts_defaults(&o);
         assert(la64m68_opts_parse(&o, 3, argv1) == -1);
 
+        /* --ram-kb is an alias for --chip-kb, so it lands in chip_kb */
         char *argv2[] = { "la64m68", "--ram-kb", "2048" };
         la64m68_opts_defaults(&o);
         assert(la64m68_opts_parse(&o, 3, argv2) == 0);
-        assert(o.ram_kb == 2048);
+        assert(o.chip_kb == 2048);
 
         char *argv3[] = { "la64m68", "--ram-kb=0x20" };
         la64m68_opts_defaults(&o);
         assert(la64m68_opts_parse(&o, 2, argv3) == 0);
-        assert(o.ram_kb == 32);
+        assert(o.chip_kb == 32);
+
+        /* the split defaults: 16 MiB chip + 512 MiB fast */
+        la64m68_opts_defaults(&o);
+        assert(o.chip_kb == 16384);
+        assert(o.fast_kb == 524288);
+
+        char *argv8[] = { "la64m68", "--chip-kb", "8192", "--fast-kb", "256" };
+        la64m68_opts_defaults(&o);
+        assert(la64m68_opts_parse(&o, 5, argv8) == 0);
+        assert(o.chip_kb == 8192 && o.fast_kb == 256);
 
         char *argv4[] = { "la64m68", "--ram-kb", "0" };
         la64m68_opts_defaults(&o);

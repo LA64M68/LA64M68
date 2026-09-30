@@ -20,7 +20,9 @@ void la64m68_opts_defaults(la64m68_opts *o)
         .plugin         = NULL,
         .fs             = NULL,
         .display        = "videocore",
-        .ram_kb         = 1024,
+        .ram_kb         = 16384,
+        .chip_kb        = 16384,
+        .fast_kb        = 524288,
         .max_steps      = 0,
         .pis            = 1,
         .pis_arm        = 0,
@@ -87,7 +89,9 @@ static const struct {
     { "vnic-ifname",    offsetof(la64m68_opts, vnic_ifname),    V_STR,  0, 0 },
     { "vhid-devices",   offsetof(la64m68_opts, vhid_devices),   V_STR,  0, 0 },
     { "rom-addr",       offsetof(la64m68_opts, rom_addr),       V_LONG, 0, 0xffffffffL },
-    { "ram-kb",         offsetof(la64m68_opts, ram_kb),         V_LONG, 1, 0x100000L },
+    { "ram-kb",         offsetof(la64m68_opts, chip_kb),        V_LONG, 1, 0x100000L },
+    { "chip-kb",        offsetof(la64m68_opts, chip_kb),        V_LONG, 1, 0x100000L },
+    { "fast-kb",        offsetof(la64m68_opts, fast_kb),        V_LONG, 0, 0x200000L },
     { "max-steps",      offsetof(la64m68_opts, max_steps),      V_LONG, 0, 0x7fffffffL },
     { "vrtg-fb-addr",   offsetof(la64m68_opts, vrtg_fb_addr),   V_LONG, 0, 0xffffffffL },
 };
@@ -106,7 +110,9 @@ void la64m68_opts_usage(const char *prog)
 "  --rom FILE             raw ROM image to load\n"
 "  --rom-addr N           load address of the ROM           [0x800]\n"
 "  --[no-]rom-vectors     reset vectors from the ROM head   [on]\n"
-"  --ram-kb N             guest RAM in KiB                  [1024]\n"
+"  --ram-kb N             guest RAM in KiB, alias for --chip-kb  [16384]\n"
+"  --chip-kb N            Chip RAM in KiB -- bitplanes live here [16384]\n"
+"  --fast-kb N            Fast RAM in KiB                      [524288]\n"
 "  --max-steps N          instructions to run, 0 = until stopped  [0]\n"
 "\n"
 "PiS (real Amiga bus -- hardware)\n"
