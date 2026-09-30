@@ -12,6 +12,7 @@
 #include "vaga.h"
 #include "pis.h"
 #include "vblk.h"
+#include "plugin_dl.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -966,6 +967,18 @@ static void test_vblk(void)
     printf("test_core: vblk ok\n");
 }
 
+/* Backend module loading. The success path is exercised by running the binary
+ * (it resolves plugins/ relative to the program root); here we pin the failure
+ * contract, which is what must hold on every host. */
+static void test_plugin_load(void)
+{
+    assert(la64m68_plugin_load(NULL) == NULL);
+    assert(la64m68_plugin_load("") == NULL);
+    assert(la64m68_plugin_load("does-not-exist.so") == NULL);
+    assert(la64m68_plugin_is_loaded(NULL) == 0);
+    printf("test_core: plugin load ok\n");
+}
+
 int main(void)
 {
     test_reset_step();
@@ -982,6 +995,7 @@ int main(void)
     test_vhid_focus();
     test_vfpu_packed();
     test_vblk();
+    test_plugin_load();
     printf("test_core: all ok\n");
     return 0;
 }

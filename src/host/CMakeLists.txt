@@ -5,10 +5,11 @@ add_library(la64m68_host STATIC
     input.c
     net.c
     pis.c
+    plugin_dl.c
 )
 
 find_package(Threads REQUIRED)
-target_link_libraries(la64m68_host PUBLIC Threads::Threads)
+target_link_libraries(la64m68_host PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 
 # VideoCore direct backend (DRM/KMS dumb buffer on RPi4B+)
 find_package(PkgConfig)

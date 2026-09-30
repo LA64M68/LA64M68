@@ -17,6 +17,7 @@ void la64m68_opts_defaults(la64m68_opts *o)
         .tos            = NULL,
         .disk           = NULL,
         .disk_ro        = 0,
+        .plugin         = NULL,
         .ram_kb         = 1024,
         .max_steps      = 4,
         .pis            = 1,
@@ -74,6 +75,7 @@ static const struct {
     { "kickstart",      offsetof(la64m68_opts, kickstart),      V_STR,  0, 0 },
     { "tos",            offsetof(la64m68_opts, tos),            V_STR,  0, 0 },
     { "disk",           offsetof(la64m68_opts, disk),           V_STR,  0, 0 },
+    { "plugin",         offsetof(la64m68_opts, plugin),         V_STR,  0, 0 },
     { "fpga-bitstream", offsetof(la64m68_opts, fpga_bitstream), V_STR,  0, 0 },
     { "pis-variant",    offsetof(la64m68_opts, pis_variant),    V_STR,  0, 0 },
     { "vrtg-backend",   offsetof(la64m68_opts, vrtg_backend),   V_STR,  0, 0 },
@@ -119,6 +121,14 @@ void la64m68_opts_usage(const char *prog)
 "  --vnic-ifname NAME     host interface for tap mode\n"
 "  --[no-]vhid            virtual HID                       [on]\n"
 "  --vhid-devices LIST    comma-separated /dev/input/eventN [auto]\n"
+"\n"
+"backends\n"
+"  --plugin FILE          architecture backend module (Amiga/Atari).\n"
+"                         Example: --plugin plugins/libla64m68_amiga.so\n"
+"  --disk KIND:PATH       storage: raw:file.img or qcow2:file.qcow2\n"
+"  --disk-ro              attach the disk read-only\n"
+"  --kickstart FILE       Amiga Kickstart ROM (native format, auto-placed)\n"
+"  --tos FILE             Atari TOS ROM (native format)\n"
 "\n"
 "  -h, --help             this text\n"
 "\n"

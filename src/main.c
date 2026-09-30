@@ -13,6 +13,7 @@
 #include "fb.h"
 #include "input.h"
 #include "pis.h"
+#include "plugin_dl.h"
 #include "net.h"
 #include <signal.h>
 #include <stdio.h>
@@ -369,7 +370,17 @@ int main(int argc, char **argv)
     }
 
     la64m68_cpu cpu;
-    la64m68_cpu_reset(&cpu, rt, NULL);
+    /* the architecture backend: Amiga, Atari, or none (pure core) */
+    la64m68_plugin *plugin = NULL;
+    if (o.plugin) {
+        plugin = la64m68_plugin_load(o.plugin);
+        if (!plugin) {
+            fprintf(stderr, "la64m68: cannot load backend %s\n", o.plugin);
+            rc = 1;
+            goto out;
+        }
+    }
+    la64m68_cpu_reset(&cpu, rt, plugin);
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);

@@ -21,6 +21,7 @@ typedef struct la64m68_opts {
     const char *tos;        /* Atari TOS ROM, standard placement */
     const char *disk;       /* storage spec KIND:PATH (raw:.. / qcow2:..) */
     int          disk_ro;   /* attach the disk read-only */
+    const char *plugin;     /* backend module, e.g. plugins/libla64m68_amiga.so */
     long         ram_kb;    /* guest RAM in KiB */
     long         max_steps; /* instructions to run */
     /* PiS passthrough (real Amiga bus) */
