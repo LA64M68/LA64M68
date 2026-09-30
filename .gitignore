@@ -1,0 +1,43 @@
+# Build artifacts
+/build/
+/build-*/
+*.o
+*.a
+*.so
+la64m68
+
+# Third-party reference trees and study material: never part of this
+# repository, in any shape
+/src/pistorm32l/
+/vendor/
+/reference/
+/study/
+
+# Generated Musashi opcode tables
+/src/pistorm32l/m68kops.c
+/src/pistorm32l/m68kops.h
+
+# FPGA / CPLD programming files: vendor-EULA output, redistribution is not
+# permitted (see THIRD-PARTY.md)
+*.svf
+*.pof
+*.sof
+*.xsvf
+*.bit
+*.bin
+
+# ROMs / Kickstart / AmigaOS images: operator-owned, never commit
+*.rom
+*.kick
+*.adf
+*.hdf
+*.lha
+
+# Local operator config / secrets
+/local/
+*.local
+
+# Editor and OS noise
+*~
+*.swp
+.DS_Store
