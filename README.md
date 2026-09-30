@@ -112,6 +112,23 @@ to the guest, and switching releases any key still held there.
 
 ---
 
+## Upcoming / Next
+
+In progress in the tree, not yet finished:
+
+| Item | State |
+|------|-------|
+| **Storage backends** — `raw` image, `qcow2` image, host filesystem | sector core and the qcow2 cluster map implemented and tested; command line wiring in progress |
+| **Standard ROM formats** — Amiga Kickstart and Atari TOS as plain binary ROMs | loading and standard placement in progress |
+| **qcow2 writes** | into existing clusters only; growing a sparse image needs refcount handling and is not done |
+| **Host filesystem passthrough** — using Amiga/Atari files that lie on Linux without wrapping them in an image | not started |
+| **Plugin loading** | the Amiga and Atari backends build as modules; loading them at runtime is not wired yet |
+
+Deliberately **not** planned at this stage: `.adf`, `.st`, `.hdf` container
+formats. Only the storage forms named above.
+
+---
+
 ## Document index
 
 | Document | Content |
