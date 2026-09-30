@@ -7,6 +7,10 @@ see `LICENSE` and `NON-PROFIT`.
 
 **Status:** in development.
 
+This repository currently carries the project documentation and licence
+notices. The source tree is published separately and incrementally; the
+layout described below is the layout it arrives in.
+
 ---
 
 ## What this is
