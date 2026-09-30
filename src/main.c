@@ -438,17 +438,17 @@ int main(int argc, char **argv)
      * a routed region there the loader writes into nothing and every vector
      * reads back zero -- which looks like a bad ROM instead of a missing
      * window. 2 MiB covers every standard base. */
-    /* ROM windows at the two documented bases, sized to what the map
-     * actually allows. A blanket 0xE00000-0xFFFFFF used to swallow the
-     * device registers at 0xF30000 and shadow them.
+    /* ROM windows, sized to stop below the device registers.
      *   0xE00000..0xE7FFFF  Atari TOS (512 KiB)
      *   0xF80000..0xFFFFFF  Amiga Kickstart (512 KiB)
-     * The Kickstart window is mirrored over 0xF00000 so 512 KiB images that
-     * decode lower are reachable too. */
-    rom_mem = la64m68_ram_memory_create(0x00F00000u, 0x100000u);
+     * A wider window (0xF00000..0xFFFFFF) swallowed the vBLK registers at
+     * 0xF30000: 0xF00000 + 0x100000 = 0x1000000, so 0xF30000 was inside it.
+     * The 512 KiB Kickstart window ends exactly at 0xFFFFFF and leaves the
+     * device area alone. */
+    rom_mem = la64m68_ram_memory_create(0x00F80000u, 0x80000u);
     rom_tos = la64m68_ram_memory_create(0x00E00000u, 0x80000u);
     if (!rom_mem || !rom_tos ||
-        route(rt, 0x00F00000u, 0x100000u, rom_mem, "kickstart window") != 0 ||
+        route(rt, 0x00F80000u, 0x80000u, rom_mem, "kickstart window") != 0 ||
         route(rt, 0x00E00000u, 0x80000u, rom_tos, "tos window") != 0) {
         fprintf(stderr, "la64m68: cannot create the ROM windows\n");
         rc = 1;

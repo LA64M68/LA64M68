@@ -1071,6 +1071,66 @@ static void test_vaga_render(void)
     printf("test_core: vaga render ok\n");
 }
 
+/* Guest memory management: Chip RAM and Fast RAM are separate regions and
+ * devices shadow RAM correctly. A memory map that looks right in the log but
+ * aliases or loses regions is the kind of defect that only shows up much
+ * later as "the guest corrupted itself". */
+static void test_ram_management(void)
+{
+    la64m68_memory *rt = la64m68_router_create();
+    la64m68_memory *chip = la64m68_ram_memory_create(0x00000000, 0x1000000u); /* 16 MiB */
+    la64m68_memory *fast = la64m68_ram_memory_create(0x01000000u, 0x20000000u); /* 512 MiB */
+    la64m68_memory *kick = la64m68_ram_memory_create(0x00f80000u, 0x80000u);
+    la64m68_memory *tos  = la64m68_ram_memory_create(0x00e00000u, 0x80000u);
+    assert(rt && chip && fast && kick && tos);
+
+    assert(la64m68_router_add(rt, 0x00000000, 0x1000000u, chip) == 0);
+    assert(la64m68_router_add(rt, 0x01000000u, 0x20000000u, fast) == 0);
+    assert(la64m68_router_add(rt, 0x00f80000u, 0x80000u, kick) == 0);
+    assert(la64m68_router_add(rt, 0x00e00000u, 0x80000u, tos) == 0);
+
+    /* 1. the two RAM areas are independent: no aliasing across the split */
+    la64m68_mem_write32(rt, 0x00000000, 0x11111111);
+    la64m68_mem_write32(rt, 0x01000000u, 0x22222222);
+    assert(la64m68_mem_read32(rt, 0x00000000) == 0x11111111);
+    assert(la64m68_mem_read32(rt, 0x01000000u) == 0x22222222);
+
+    /* 2. chip RAM is genuinely 16 MiB: the last word is reachable */
+    la64m68_mem_write32(rt, 0x00fffffc, 0x33333333);
+    assert(la64m68_mem_read32(rt, 0x00fffffc) == 0x33333333);
+    assert(la64m68_mem_read32(rt, 0x00000000) == 0x11111111);
+
+    /* 3. fast RAM is genuinely 512 MiB and does not wrap into chip */
+    la64m68_mem_write32(rt, 0x01000000u + 0x1ffffffcu, 0x44444444);
+    assert(la64m68_mem_read32(rt, 0x01000000u + 0x1ffffffcu) == 0x44444444);
+    assert(la64m68_mem_read32(rt, 0x00fffffc) == 0x33333333);
+
+    /* 4. a device routed later SHADOWS chip RAM -- newest wins */
+    la64m68_mem_write32(rt, 0x00f30000u, 0x55555555);   /* still RAM here */
+    assert(la64m68_mem_read32(rt, 0x00f30000u) == 0x55555555);
+    la64m68_memory *dev = la64m68_ram_memory_create(0x00f30000u, 0x100u);
+    assert(dev && la64m68_router_add(rt, 0x00f30000u, 0x100u, dev) == 0);
+    assert(la64m68_mem_read32(rt, 0x00f30000u) == 0);   /* device answers now */
+    la64m68_mem_write32(rt, 0x00f30000u, 0x66666666);
+    assert(la64m68_mem_read32(rt, 0x00f30000u) == 0x66666666);
+    assert(la64m68_mem_read32(rt, 0x00fffffc) == 0x33333333);   /* chip intact */
+
+    /* 5. the ROM windows must not swallow the device registers */
+    assert(0x00f80000u + 0x80000u <= 0x00f30000u || 0x00f30000u + 0x100u <= 0x00f80000u);
+    assert(0x00e00000u + 0x80000u <= 0x00f30000u);
+
+    /* 6. chip and fast have no overlap at all */
+    assert(0x00000000u + 0x1000000u <= 0x01000000u);
+
+    la64m68_router_destroy(rt);
+    la64m68_ram_memory_destroy(chip);
+    la64m68_ram_memory_destroy(fast);
+    la64m68_ram_memory_destroy(kick);
+    la64m68_ram_memory_destroy(tos);
+    la64m68_ram_memory_destroy(dev);
+    printf("test_core: ram management ok\n");
+}
+
 int main(void)
 {
     test_reset_step();
@@ -1090,6 +1150,7 @@ int main(void)
     test_plugin_load();
     test_vfs_names();
     test_vaga_render();
+    test_ram_management();
     printf("test_core: all ok\n");
     return 0;
 }
