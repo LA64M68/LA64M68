@@ -29,7 +29,6 @@
 
 struct la64m68_input {
     la64m68_vhid *vhid;
-    int grab;
     /* Ctrl+Alt+Pause focus chord (vHID feature) */
     int chord_ctrl, chord_alt, chord_active;
 #ifdef LA64M68_HAVE_EVDEV
@@ -218,7 +217,6 @@ void la64m68_input_poll(la64m68_input *i)
 void la64m68_input_grab(la64m68_input *i, int grab)
 {
     if (!i) return;
-    i->grab = grab;
 #ifdef LA64M68_HAVE_EVDEV
     for (int d = 0; d < i->nfds; d++)
         ioctl(i->fds[d], EVIOCGRAB, (void *)(long)(grab ? 1 : 0));

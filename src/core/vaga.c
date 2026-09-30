@@ -228,9 +228,16 @@ static void vaga_copper_start(la64m68_vaga *v)
 {
     uint32_t list = ((uint32_t)v->regs[REG_COP1LCH >> 1] << 16) |
                     v->regs[REG_COP1LCL >> 1];
+    if ((list & 0xffff0000u) == 0) {
+        /* A null or near-null list pointer means the guest has not set one
+         * up yet. Starting anyway would let the copper walk unmapped memory
+         * and write decoded garbage into the custom registers. */
+        la64m68_trace("vaga: COPJMP1 with no list pointer (%08x) ignored", list);
+        v->cop_active = 0;
+        return;
+    }
     v->cop_pc = list & 0xfffffffeu;
     v->cop_active = 1;
-    v->cop_stall = 0;
     la64m68_trace("vaga: copper started at %08x", v->cop_pc);
 }
 
@@ -265,10 +272,8 @@ static void vaga_copper_run(la64m68_vaga *v, int steps)
             return;
         }
         if (!copper_pos_match(v, vp, hp, vpm, hpm)) {
-            v->cop_stall = 1;                      /* resume on a later line */
             return;
         }
-        v->cop_stall = 0;
         /* SKIP: on a true condition the following instruction pair is
          * skipped, so advance by two pairs instead of one. */
         v->cop_pc += skip ? 8 : 4;
@@ -307,7 +312,7 @@ int la64m68_vaga_ipl(la64m68_vaga *v)
 void la64m68_vaga_tick(la64m68_vaga *v, int cycles)
 {
     if (!v || cycles <= 0) return;
-    v->vpos += (uint32_t)cycles;
+    v->vpos = (v->vpos + (uint32_t)cycles) & 0x7fffffffu;
 
     v->frame_acc += (uint32_t)cycles;
     while (v->frame_acc >= VAGA_FRAME_CYCLES) {
@@ -409,7 +414,10 @@ int la64m68_vaga_render(la64m68_vaga *v, uint8_t *rgb24, uint32_t stride,
             if (row_bytes > sizeof(row[0])) return -1;
             for (uint32_t i = 0; i < row_bytes; i++)
                 row[p][i] = la64m68_mem_read8(v->mem, ptr[p] + i);
-            ptr[p] += row_bytes + (uint32_t)mod[p];
+            /* signed: BPLxMOD is a 16-bit SIGNED modulo. Casting a negative
+             * value to uint32_t advanced the pointer by ~4 GiB instead of
+             * back, which is what interleaved playfields use. */
+            ptr[p] = (uint32_t)((int32_t)ptr[p] + (int32_t)row_bytes + mod[p]);
         }
         for (uint32_t x = 0; x < width; x++) {
             uint32_t byte = x >> 3;
@@ -464,7 +472,10 @@ int la64m68_vaga_render_planar(la64m68_vaga *v, uint8_t *out,
         for (int p = 0; p < d; p++) {
             for (uint32_t i = 0; i < row_bytes; i++)
                 *o++ = la64m68_mem_read8(v->mem, ptr[p] + i);
-            ptr[p] += row_bytes + (uint32_t)mod[p];
+            /* signed: BPLxMOD is a 16-bit SIGNED modulo. Casting a negative
+             * value to uint32_t advanced the pointer by ~4 GiB instead of
+             * back, which is what interleaved playfields use. */
+            ptr[p] = (uint32_t)((int32_t)ptr[p] + (int32_t)row_bytes + mod[p]);
         }
     }
     *w = width; *h = height; *depth = d;
@@ -483,7 +494,10 @@ int la64m68_vaga_render_st(la64m68_vaga *v, uint8_t *out,
         for (int p = 0; p < d; p++) {
             for (uint32_t i = 0; i < row_bytes; i++)
                 *o++ = la64m68_mem_read8(v->mem, ptr[p] + i);
-            ptr[p] += row_bytes + (uint32_t)mod[p];
+            /* signed: BPLxMOD is a 16-bit SIGNED modulo. Casting a negative
+             * value to uint32_t advanced the pointer by ~4 GiB instead of
+             * back, which is what interleaved playfields use. */
+            ptr[p] = (uint32_t)((int32_t)ptr[p] + (int32_t)row_bytes + mod[p]);
         }
     }
     *w = width; *h = height; *depth = d;

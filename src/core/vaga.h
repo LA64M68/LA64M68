@@ -44,7 +44,6 @@ typedef struct la64m68_vaga {
     uint32_t blit_left;                     /* cycles until the blit is done */
     uint32_t cop_pc;                        /* copper program counter */
     int      cop_active;                    /* list is running */
-    int      cop_stall;                     /* waiting on a WAIT position */
     uint32_t cop_hpos;                      /* horizontal counter, 0..227 */
     uint16_t intreq;                        /* latched INTREQ bits */
     int      enabled;
