@@ -125,7 +125,8 @@ In progress in the tree, not yet finished:
 | **Storage backends** — `raw` image, `qcow2` image | done: `--disk raw:PATH` / `--disk qcow2:PATH`, qcow2 cluster map tested |
 | **Standard ROM formats** — Amiga Kickstart and Atari TOS as plain binary ROMs | done: native format, auto-placed at the documented bases |
 | **qcow2 writes** | into existing clusters only; growing a sparse image needs refcount handling and is not done |
-| **Host filesystem passthrough** — using Amiga/Atari files that lie on Linux without wrapping them in an image | not started |
+| **VFS write/read commands** | directory listing and name-checked file access are in place; the guest-side driver work is still open |
+| **Host filesystem passthrough** — using Amiga/Atari files that lie on Linux without wrapping them in an image | done: `--fs DIR`, guest sees one directory, names cannot escape it |
 | **Backend plugin loading** — the Amiga/Atari modules in `plugins/` | done: `--plugin plugins/libla64m68_amiga.so`, resolved against the program root |
 
 Deliberately **not** planned at this stage: `.adf`, `.st`, `.hdf` container

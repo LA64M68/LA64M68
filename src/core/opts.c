@@ -18,6 +18,7 @@ void la64m68_opts_defaults(la64m68_opts *o)
         .disk           = NULL,
         .disk_ro        = 0,
         .plugin         = NULL,
+        .fs             = NULL,
         .ram_kb         = 1024,
         .max_steps      = 4,
         .pis            = 1,
@@ -76,6 +77,7 @@ static const struct {
     { "tos",            offsetof(la64m68_opts, tos),            V_STR,  0, 0 },
     { "disk",           offsetof(la64m68_opts, disk),           V_STR,  0, 0 },
     { "plugin",         offsetof(la64m68_opts, plugin),         V_STR,  0, 0 },
+    { "fs",             offsetof(la64m68_opts, fs),             V_STR,  0, 0 },
     { "fpga-bitstream", offsetof(la64m68_opts, fpga_bitstream), V_STR,  0, 0 },
     { "pis-variant",    offsetof(la64m68_opts, pis_variant),    V_STR,  0, 0 },
     { "vrtg-backend",   offsetof(la64m68_opts, vrtg_backend),   V_STR,  0, 0 },
@@ -126,6 +128,7 @@ void la64m68_opts_usage(const char *prog)
 "  --plugin FILE          architecture backend module (Amiga/Atari).\n"
 "                         Example: --plugin plugins/libla64m68_amiga.so\n"
 "  --disk KIND:PATH       storage: raw:file.img or qcow2:file.qcow2\n"
+"  --fs DIR               expose a host directory to the guest by name\n"
 "  --disk-ro              attach the disk read-only\n"
 "  --kickstart FILE       Amiga Kickstart ROM (native format, auto-placed)\n"
 "  --tos FILE             Atari TOS ROM (native format)\n"

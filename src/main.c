@@ -8,6 +8,7 @@
 #include "vhid.h"
 #include "vaga.h"
 #include "vblk.h"
+#include "vfs.h"
 #include "debug.h"
 #include "host.h"
 #include "fb.h"
@@ -194,6 +195,8 @@ int main(int argc, char **argv)
     la64m68_vaga    vaga;
     la64m68_vblk    vblk;
     la64m68_memory *vblk_regs = NULL;
+    la64m68_vfs    vfs;
+    la64m68_memory *vfs_regs = NULL;
     fb_glue         glue      = { NULL, NULL, 0, 0, NULL };
 
     /* First thing: the program root. LA64M68 uses only its own directory, so
@@ -351,6 +354,18 @@ int main(int argc, char **argv)
         goto out;
     }
 
+    /* Filesystem passthrough: --fs DIR exposes a host directory by name. */
+    if (o.fs) {
+        la64m68_vfs_init(&vfs, rt, o.fs);
+        vfs_regs = la64m68_vfs_regs_memory(&vfs);
+        if (!vfs_regs || route(rt, LA64M68_VFS_REG_BASE, 0x100, vfs_regs,
+                               "vfs regs") != 0) {
+            rc = 1;
+            goto out;
+        }
+        fprintf(stderr, "la64m68: host directory %s exposed to the guest\n", o.fs);
+    }
+
     /* Storage: --disk KIND:PATH attaches a virtual block device. */
     if (o.disk) {
         la64m68_vblk_init(&vblk, rt);
@@ -425,6 +440,7 @@ out:
         la64m68_vblk_regs_destroy(vblk_regs);
         la64m68_vblk_src_close(&vblk.src);
     }
+    if (vfs_regs) la64m68_vfs_regs_destroy(vfs_regs);
     la64m68_host_destroy(host);
     return rc;
 }

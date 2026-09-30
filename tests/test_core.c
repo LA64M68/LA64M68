@@ -12,6 +12,7 @@
 #include "vaga.h"
 #include "pis.h"
 #include "vblk.h"
+#include "vfs.h"
 #include "plugin_dl.h"
 #include <assert.h>
 #include <math.h>
@@ -979,6 +980,33 @@ static void test_plugin_load(void)
     printf("test_core: plugin load ok\n");
 }
 
+/* VFS name boundary: the guest must not be able to leave its root. These are
+ * the cases that decide whether passthrough is a boundary or just a
+ * suggestion. */
+static void test_vfs_names(void)
+{
+    assert(la64m68_vfs_name_ok("kick.rom") == 0);
+    assert(la64m68_vfs_name_ok("os/system/rom.img") == 0);
+    assert(la64m68_vfs_name_ok("a.b.c") == 0);
+
+    /* escaping and malformed names */
+    assert(la64m68_vfs_name_ok("../etc/passwd") == -1);
+    assert(la64m68_vfs_name_ok("..") == -1);
+    assert(la64m68_vfs_name_ok("a/../../b") == -1);
+    assert(la64m68_vfs_name_ok("/etc/passwd") == -1);
+    assert(la64m68_vfs_name_ok("/") == -1);
+    assert(la64m68_vfs_name_ok("a//b") == -1);
+    assert(la64m68_vfs_name_ok("") == -1);
+    assert(la64m68_vfs_name_ok(NULL) == -1);
+    {
+        char long_name[VFS_NAME_MAX + 8];
+        memset(long_name, 'x', sizeof(long_name) - 1);
+        long_name[sizeof(long_name) - 1] = 0;
+        assert(la64m68_vfs_name_ok(long_name) == -1);
+    }
+    printf("test_core: vfs names ok\n");
+}
+
 int main(void)
 {
     test_reset_step();
@@ -996,6 +1024,7 @@ int main(void)
     test_vfpu_packed();
     test_vblk();
     test_plugin_load();
+    test_vfs_names();
     printf("test_core: all ok\n");
     return 0;
 }
