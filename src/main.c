@@ -400,7 +400,9 @@ int main(int argc, char **argv)
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
 
-    for (long i = 0; i < o.max_steps && !g_stop; i++) {
+    /* max_steps 0 = run until SIGINT/SIGTERM: that is the live default.
+     * A bounded count is for automated smoke runs only. */
+    for (long i = 0; (o.max_steps <= 0 || i < o.max_steps) && !g_stop; i++) {
         if (input && (i & 0xfff) == 0) la64m68_input_poll(input);
         if ((i & 0xff) == 0) {
             int ipl = la64m68_pis_ipl_level(pis);

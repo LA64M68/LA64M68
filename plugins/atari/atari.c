@@ -23,6 +23,8 @@ la64m68_plugin *la64m68_plugin_create(void)
 {
     atari_ctx *a = calloc(1, sizeof(*a));
     la64m68_plugin *p = calloc(1, sizeof(*p));
+    if (!p) return NULL;
+    p->abi = LA64M68_PLUGIN_ABI;
     if (!a || !p) { free(a); free(p); return NULL; }
     p->name = "atari";
     p->ctx = a;

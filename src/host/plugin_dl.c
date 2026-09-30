@@ -34,7 +34,7 @@ la64m68_plugin *la64m68_plugin_load(const char *path)
     }
 
     la64m68_plugin *p = create();
-    if (!p || !p->name) {
+    if (!p || !p->name || p->abi != LA64M68_PLUGIN_ABI) {
         la64m68_trace("plugin: %s returned no usable descriptor", path);
         dlclose(h);
         return NULL;

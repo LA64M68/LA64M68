@@ -20,7 +20,7 @@ void la64m68_opts_defaults(la64m68_opts *o)
         .plugin         = NULL,
         .fs             = NULL,
         .ram_kb         = 1024,
-        .max_steps      = 4,
+        .max_steps      = 0,
         .pis            = 1,
         .pis_arm        = 0,
         .pis_variant    = "auto",
@@ -105,7 +105,7 @@ void la64m68_opts_usage(const char *prog)
 "  --rom-addr N           load address of the ROM           [0x800]\n"
 "  --[no-]rom-vectors     reset vectors from the ROM head   [on]\n"
 "  --ram-kb N             guest RAM in KiB                  [1024]\n"
-"  --max-steps N          instructions to run               [4]\n"
+"  --max-steps N          instructions to run, 0 = until stopped  [0]\n"
 "\n"
 "PiS (real Amiga bus -- hardware)\n"
 "  --[no-]pis             PiS passthrough                   [on]\n"

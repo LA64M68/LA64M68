@@ -24,7 +24,7 @@ typedef struct la64m68_opts {
     const char *plugin;     /* backend module, e.g. plugins/libla64m68_amiga.so */
     const char *fs;          /* host directory exposed to the guest */
     long         ram_kb;    /* guest RAM in KiB */
-    long         max_steps; /* instructions to run */
+    long         max_steps; /* instructions to run, 0 = until signalled */
     /* PiS passthrough (real Amiga bus) */
     int          pis;
     int          pis_arm;   /* hardware gate: drive the bus (default OFF) */
