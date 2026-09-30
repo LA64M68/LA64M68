@@ -142,11 +142,3 @@ formats. Only the storage forms named above.
 | `NON-PROFIT` | Non-Profit statement |
 | `THIRD-PARTY.md` | third-party components, provenance, licences |
 | `scripts/` | ready-made command lines |
-
----
-
-## Scope
-
-AmigaOS is studied as a bootstrap target to validate M68k peripherals, timing
-and the framebuffer bridge. It is not a supported product feature, and no
-support commitment or delivery is implied.
