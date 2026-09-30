@@ -425,6 +425,14 @@ int main(int argc, char **argv)
          * which is correct -- without vHID there is no focus switch to honour. */
         glue.vhid = &vhid;
         input = la64m68_input_create(&vhid, o.vhid_devices);
+        /* Initial focus decides whose output is presented. Default is the
+         * host (fail-safe: you keep control of the machine); --focus guest
+         * hands keyboard/mouse and the display to LA64M68. Placed AFTER the
+         * input device exists, or the grab would target NULL. */
+        if (o.focus && !strcmp(o.focus, "guest")) {
+            la64m68_vhid_set_focus(&vhid, LA64M68_VHID_FOCUS_GUEST);
+            la64m68_input_grab(input, 1);
+        }
         vregs[2] = la64m68_vhid_regs_memory(&vhid);
         if (route(rt, LA64M68_VHID_REG_BASE, 0x100, vregs[2],
                   "vhid regs") != 0) {

@@ -721,36 +721,33 @@ static int op_line0(la64m68_cpu *c, uint16_t op)
     int sel = (op >> 8) & 0xf;
     if (sel == 8)                           /* static bit op: #n in extension */
         return bitop(c, op, szbits, fetch16(c));
-    if (szbits == 3) {
-        /* immediate-to-CCR/SR forms */
+    /* immediate-to-CCR/SR forms (ORI/ANDI/EORI only).
+     *
+     * EA == 0x3c is the discriminator: the immediate EA is reserved for
+     * exactly these on that group. The SIZE then picks the destination --
+     * 00 = CCR (byte, unprivileged), 01 = SR (word, privileged).
+     *
+     * This used to be gated on `szbits == 3`, which no CCR/SR form has
+     * (they are 00 and 01), so the entire group was unreachable: 0x007C,
+     * ORI #,SR, fell through and raised Line-F. */
+    if ((op & 0x003f) == 0x3c && (sel == 0 || sel == 2 || sel == 0xa)) {
         uint16_t imm = fetch16(c);
-        if (sel == 0 && (op & 0x003f) == 0x3c) {          /* ORI #,CCR */
-            c->sr |= imm & 0x1f;
+        if (szbits != 1) {                            /* CCR (byte) */
+            if (sel == 0)      c->sr |= (uint16_t)(imm & 0x1f);
+            else if (sel == 2) c->sr &= (uint16_t)(~0x1fu | (imm & 0x1fu));
+            else               c->sr ^= (uint16_t)(imm & 0x1f);
             return 1;
         }
-        if (sel == 2 && (op & 0x003f) == 0x3c) {          /* ANDI #,CCR */
-            /* AND the CCR bits with imm, keep every upper SR bit. The parens
-             * make the precedence explicit; the old bare `~0x1f | x` relied
-             * on `~` binding tighter than `|`. */
-            c->sr &= (uint16_t)(~0x1fu | (imm & 0x1fu));
-            return 1;
-        }
-        if (sel == 0xa && (op & 0x003f) == 0x3c) {        /* EORI #,CCR */
-            c->sr ^= imm & 0x1f;
-            return 1;
-        }
-        if ((op & 0x003f) == 0x3c) {                      /* SR forms (privileged) */
-            if (!(c->sr & SR_S)) { la64m68_cpu_exception(c, 8); return 1; }
-            uint16_t nw;
-            if (sel == 0)      nw = c->sr | (imm & 0xa71f);   /* ORI #,SR */
-            else if (sel == 2) nw = c->sr & (imm & 0xa71f);   /* ANDI #,SR */
-            else if (sel == 0xa) nw = c->sr ^ (imm & 0xa71f); /* EORI #,SR */
-            else return -1;
-            cpu_set_sr(c, nw);
-            return 1;
-        }
-        return -1;
+        /* SR (word): privileged */
+        if (!(c->sr & SR_S)) { la64m68_cpu_exception(c, 8); return 1; }
+        uint16_t nw;
+        if (sel == 0)      nw = (uint16_t)(c->sr | (imm & 0xa71f));
+        else if (sel == 2) nw = (uint16_t)(c->sr & (imm & 0xa71f));
+        else               nw = (uint16_t)(c->sr ^ (imm & 0xa71f));
+        cpu_set_sr(c, nw);
+        return 1;
     }
+
     int size = szbits == 0 ? SZ_B : szbits == 1 ? SZ_W : SZ_L;
     uint32_t imm = (size == SZ_L) ? fetch32(c) : fetch16(c);
     if (size == SZ_B) imm &= 0xff;
@@ -1116,15 +1113,18 @@ static int op_line4(la64m68_cpu *c, uint16_t op)
             if (q32 & 0x80000000u) c->sr |= SR_N;
             return 1;
         }
-        if ((op & 0xf1c0) == 0x41c0) {  /* LEA <ea>,An (control modes only) */
+        if ((op & 0xf1c0) == 0x41c0) {  /* LEA <ea>,An (control modes) */
+            /* Mode 6 (d8(An,Xn)) is a control mode and is legal here -- the
+             * old check dropped every indexed LEA, which is how Boot.rom
+             * addresses its tables:  f81e2e: lea a1@(0,d0:l),a3 */
             int m = ea_mode(op);
-            if (m != 2 && m != 5 && m != 7) return -1;
+            if (m != 2 && m != 5 && m != 6 && m != 7) return -1;
             c->regs[8 + ((op >> 9) & 7)] = ea_addr(c, op);
             return 1;
         }
-        if ((op & 0xffc0) == 0x4840) {  /* PEA <ea> (control modes only) */
+        if ((op & 0xffc0) == 0x4840) {  /* PEA <ea> (control modes) */
             int m = ea_mode(op);
-            if (m != 2 && m != 5 && m != 7) return -1;
+            if (m != 2 && m != 5 && m != 6 && m != 7) return -1;
             uint32_t a = ea_addr(c, op);
             uint32_t sp = c->regs[15];
             cwrite(c, sp - 4, a, SZ_L);
@@ -1609,6 +1609,35 @@ static int op_fpu_general(la64m68_cpu *c, uint16_t op)
         return 1;
     }
 
+    /* FMOVE.L <ea>,FPCR/FPSR/FPIAR (rmode 4) and the reverse (rmode 5).
+     * These are the FPU CONTROL registers, not data registers -- a plain
+     * arithmetic path would never see them. Boot.rom probes them right after
+     * the cache setup:
+     *   f80cf8: fmovel d1,fpcr     (ext 0x9000)
+     *   f80cfc: fmovel fpcr,d1     (ext 0xB000)
+     * Register select is in extension bits 10:8. */
+    if (rmode == 4 || rmode == 5) {
+        /* fpcr is 16 bit while fpsr/fpiar are 32 bit, so they cannot share a
+         * pointer type -- select explicitly. */
+        int sel = (x >> 8) & 7;
+        if (rmode == 4) {
+            uint32_t v = ea_read(c, op, SZ_L);
+            if (sel == 0)      c->vfpu.fpcr = (uint16_t)v;
+            else if (sel == 1) c->vfpu.fpsr = v;
+            else               c->vfpu.fpiar = v;
+            la64m68_trace("fpu: fmove.l %08x -> %s", v,
+                          sel == 0 ? "fpcr" : sel == 1 ? "fpsr" : "fpiar");
+        } else {
+            uint32_t v = sel == 0 ? (uint32_t)c->vfpu.fpcr
+                     : sel == 1 ? c->vfpu.fpsr
+                                : c->vfpu.fpiar;
+            ea_write(c, op, SZ_L, v);
+            la64m68_trace("fpu: fmove.l %s -> %08x",
+                          sel == 0 ? "fpcr" : sel == 1 ? "fpsr" : "fpiar", v);
+        }
+        return 1;
+    }
+
     if (rmode == 0 || rmode == 2) {     /* F<op>: rmode0 = FPm src, rmode2 = <ea> src */
         double s;
         if (rmode == 0) {
@@ -1755,6 +1784,28 @@ static int op_linef(la64m68_cpu *c, uint16_t op)
     }
     if ((op & 0x0e00) != 0x0200)        /* cp id != 1 (FPU): real LINE-F trap */
         goto trap;
+    /* FSAVE / FRESTORE (0xF300|ea and 0xF340|ea).
+     *
+     * These bracket FPU state across task switches: FSAVE pushes an FPU
+     * frame, FRESTORE pops one. Our vFPU keeps no per-task state, so the
+     * only thing that matters is that the STACK stays balanced -- the real
+     * 68040 writes a 4-byte null frame when the FPU is idle, so we do the
+     * same. Getting this wrong desynchronises A7 and every later call is
+     * then garbage. */
+    if ((op & 0xffc0) == 0xf300) {      /* FSAVE <ea> */
+        uint32_t a = ea_addr(c, op);
+        a -= 4;
+        cwrite(c, a, 0, SZ_L);          /* null frame: first byte zero */
+        if (ea_mode(op) == 1) c->regs[8 + ea_reg(op)] = a;
+        la64m68_trace("fpu: fsave (null frame)");
+        return 1;
+    }
+    if ((op & 0xffc0) == 0xf340) {      /* FRESTORE <ea> */
+        uint32_t a = ea_addr(c, op);
+        if (ea_mode(op) == 1) c->regs[8 + ea_reg(op)] = a + 4;
+        la64m68_trace("fpu: frestore");
+        return 1;
+    }
     switch ((op >> 6) & 7) {
     case 0:
         return op_fpu_general(c, op);
@@ -1783,9 +1834,6 @@ static int op_linef(la64m68_cpu *c, uint16_t op)
         ea_write(c, op, SZ_B, fcc_true(c, cc) ? 0xff : 0x00);
         return 1;
     }
-    case 7:                             /* FSAVE/FRESTORE etc: later */
-        fetch16(c);
-        return -1;
     default:
         return -1;
     }
@@ -1842,7 +1890,11 @@ static int dispatch(la64m68_cpu *c, uint16_t op)
         if ((op & 0xf1c0) == 0xc0c0) return op_mul(c, op, 0); /* MULU.W */
         if ((op & 0xf1c0) == 0xc1c0) return op_mul(c, op, 1); /* MULS.W */
         if ((op & 0xf1f0) == 0xc100) return op_bcd(c, op, 0); /* ABCD */
-        if ((op & 0xf100) == 0xc100) {                        /* EXG */
+        /* EXG swaps two REGISTERS, so it only exists for modes 0/1. The
+         * bare mask also matches AND.B Dn,<ea> (opmode 100): 0xC329 is
+         * AND.B d16(A1),D3 and used to fall into EXG, fail the mode check
+         * and return -1. The ADD/SUBX guard above already had this. */
+        if ((op & 0xf100) == 0xc100 && ea_mode(op) <= 1) {    /* EXG */
             int mode = (op >> 3) & 0x1f, rx = (op >> 9) & 7, ry = op & 7;
             uint32_t t;
             if (mode == 8)       { t = c->regs[rx]; c->regs[rx] = c->regs[ry]; c->regs[ry] = t; }

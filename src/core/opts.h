@@ -24,6 +24,7 @@ typedef struct la64m68_opts {
     const char *plugin;     /* backend module, e.g. plugins/libla64m68_amiga.so */
     const char *fs;          /* host directory exposed to the guest */
     const char *display;     /* output target: videocore | amiga-gfx | atari-gfx */
+    const char *focus;       /* initial focus: host | guest */
     long         ram_kb;    /* guest RAM in KiB (alias for chip_kb) */
     long         chip_kb;   /* Chip RAM in KiB -- bitplanes live here */
     long         fast_kb;   /* Fast RAM in KiB */

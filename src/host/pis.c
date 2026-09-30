@@ -257,7 +257,11 @@ static void reg_write(la64m68_pis *p, uint32_t reg, uint32_t data)
     *p->gpclr = 1u << PIN_WR;
     *p->gpclr = 1u << PIN_WR;
     *p->gpset = 1u << PIN_WR;
-    *p->gpclr = DATA_PINS;   /* release data, keep the strobes driven */
+    /* Clear BOTH the data and the address pins afterwards, exactly as
+     * ps_protocol.c does (`*(gpreset) = 0x0fffff3f`). Leaving A0..A2 driven
+     * after the strobe is the one structural difference still standing
+     * against the reference. */
+    *p->gpclr = DATA_PINS | ADDR_PINS;
 }
 
 static uint32_t reg_read(la64m68_pis *p, uint32_t reg)
@@ -270,7 +274,7 @@ static uint32_t reg_read(la64m68_pis *p, uint32_t reg)
     *p->gpclr = 1u << PIN_RD;
     uint32_t d = *p->gplev;
     *p->gpset = 1u << PIN_RD;
-    *p->gpclr = DATA_PINS;
+    *p->gpclr = DATA_PINS | ADDR_PINS;
     return (d >> PIN_D(0)) & 0xffff;
 }
 
@@ -412,6 +416,11 @@ la64m68_pis *la64m68_pis_open(int arm, int variant)
         return NULL;
     p->fd = -1;
     p->poll_txn = 1;
+    /* 68k function code. 0 is RESERVED and selects no address space at all,
+     * so the FPGA never ran the cycle and TXN never came back -- every access
+     * timed out. 5 = supervisor data is what hardware register access uses.
+     * The CPU layer refines it through la64m68_pis_set_fc(). */
+    p->fc = 5;
     p->armed = arm ? 1 : 0;
 
     /* Resolve the variant up front. There is no board-id register to read
@@ -544,6 +553,11 @@ static void free_win(la64m68_memory *m)
     if (!m) return;
     free(m->ctx);
     free(m);
+}
+
+void la64m68_pis_set_fc(la64m68_pis *p, int fc)
+{
+    if (p && fc >= 0 && fc <= 7) p->fc = (uint32_t)fc;
 }
 
 int la64m68_pis_armed(const la64m68_pis *p)

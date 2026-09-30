@@ -103,6 +103,11 @@ int           la64m68_pis_status(la64m68_pis *p);
  * meaningful once the FPGA is programmed. */
 int la64m68_pis_cpu_release(la64m68_pis *p);
 
+/* 68k function code used for every bus cycle: 1=user data, 2=user program,
+ * 5=supervisor data, 6=supervisor program. Defaults to 5 (supervisor data),
+ * which is what hardware-register access uses. */
+void la64m68_pis_set_fc(la64m68_pis *p, int fc);
+
 /* Read IPL0-2 lines (active low) -> 68k interrupt level 0-7 (0=none). */
 int           la64m68_pis_ipl_level(la64m68_pis *p);
 

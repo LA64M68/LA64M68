@@ -20,6 +20,7 @@ void la64m68_opts_defaults(la64m68_opts *o)
         .plugin         = NULL,
         .fs             = NULL,
         .display        = "videocore",
+        .focus          = "host",
         .ram_kb         = 16384,
         .chip_kb        = 16384,
         .fast_kb        = 524288,
@@ -82,6 +83,7 @@ static const struct {
     { "plugin",         offsetof(la64m68_opts, plugin),         V_STR,  0, 0 },
     { "fs",             offsetof(la64m68_opts, fs),             V_STR,  0, 0 },
     { "display",        offsetof(la64m68_opts, display),        V_STR,  0, 0 },
+    { "focus",          offsetof(la64m68_opts, focus),          V_STR,  0, 0 },
     { "fpga-bitstream", offsetof(la64m68_opts, fpga_bitstream), V_STR,  0, 0 },
     { "pis-variant",    offsetof(la64m68_opts, pis_variant),    V_STR,  0, 0 },
     { "vrtg-backend",   offsetof(la64m68_opts, vrtg_backend),   V_STR,  0, 0 },
@@ -142,6 +144,8 @@ void la64m68_opts_usage(const char *prog)
 "  --display NAME         videocore   host surface (/dev/fb0, DRM)  [default]\n"
 "                         amiga-gfx   Amiga Denise planar output (fallback)\n"
 "                         atari-gfx   Atari ST interleaved output (fallback)\n"
+"  --focus NAME           host    host keeps keyboard/mouse and output  [default]\n"
+"                         guest   LA64M68 owns them (Ctrl+Alt+Pause toggles)\n"
 "  --disk-ro              attach the disk read-only\n"
 "  --kickstart FILE       Amiga Kickstart ROM (native format, auto-placed)\n"
 "  --tos FILE             Atari TOS ROM (native format)\n"

@@ -1049,7 +1049,7 @@ static void test_vaga_render(void)
     la64m68_mem_write8(mem, 0x1000, 0xaa);
     for (int i = 1; i < 40; i++) la64m68_mem_write8(mem, 0x1000 + i, 0x00);
 
-    static uint8_t out[320 * 2 * 3];
+    static uint8_t out[640 * 256 * 3];   /* worst case: hires, 256 lines */
     uint32_t w = 0, h = 0;
     assert(la64m68_vaga_render(&v, out, 320 * 3, &w, &h) == 0);
     assert(w == 320 && h == 2);
@@ -1062,9 +1062,20 @@ static void test_vaga_render(void)
     uint8_t *row1 = out + 320 * 3;
     assert(row1[0] == 0x00 && row1[1] == 0x00);
 
-    /* no display configured -> must refuse rather than invent a picture */
+    /* an illegal depth must refuse; a LEGAL one must not. depth 0 is a real
+     * Amiga display state -- no bitplanes, so the screen is COLOR00 -- and
+     * rendering it is exactly what makes an enabled display visible. */
     la64m68_vaga_init(&v);
     la64m68_vaga_set_mem(&v, mem);
+    v.regs[LA64M68_VAGA_REG_BPLCON0 / 2] = 0;   /* depth 0 */
+    v.regs[LA64M68_VAGA_REG_COLOR00 / 2] = 0x0777;
+    assert(la64m68_vaga_render(&v, out, 320 * 3, &w, &h) == 0);
+    assert(w == 320 && h == 256);
+    assert(out[0] == 0x77 && out[1] == 0x77 && out[2] == 0x77);  /* COLOR00 */
+    assert(out[319 * 3] == 0x77);                 /* far edge too */
+
+    /* an illegal depth is still refused */
+    v.regs[LA64M68_VAGA_REG_BPLCON0 / 2] = (uint16_t)(7u << 12);
     assert(la64m68_vaga_render(&v, out, 320 * 3, &w, &h) == -1);
 
     la64m68_ram_memory_destroy(mem);
@@ -1250,6 +1261,49 @@ static void test_vaga_copper(void)
     printf("test_core: vaga copper ok\n");
 }
 
+/* d16(An) round-trip. Kickstart's delay routine counts at (A2) but tests the
+ * value at 4(A7); it terminates only when both denote the same location. A
+ * write to d16(An) followed by a read from the same EA must therefore come
+ * back identical -- and a pointer derived from the same base must land on the
+ * same byte. */
+static void test_d16_an_roundtrip(void)
+{
+    la64m68_memory *mem = la64m68_ram_memory_create(0, 65536);
+    assert(mem);
+    la64m68_mem_write32(mem, 0, 0x00002000);
+    la64m68_mem_write32(mem, 4, 0x00001000);
+
+    /*   MOVEA.L #$2000,A7        set a stack base
+     *   MOVE.L  #$0,4(A7)        write through d16(An)
+     *   ADDQ.L  #1,4(A7)         RMW through the same EA
+     *   MOVE.L  4(A7),D2         read it back                    */
+    la64m68_mem_write16(mem, 0x1000, 0x2e7c);   /* MOVEA.L #$2000,A7 */
+    la64m68_mem_write32(mem, 0x1002, 0x00002000);
+    la64m68_mem_write16(mem, 0x1006, 0x2f7c);   /* MOVE.L #0,4(A7)   */
+    la64m68_mem_write32(mem, 0x1008, 0x00000000);
+    la64m68_mem_write16(mem, 0x100c, 0x0004);   /* displacement      */
+    la64m68_mem_write16(mem, 0x100e, 0x52af);   /* ADDQ.L #1,4(A7)   */
+    la64m68_mem_write16(mem, 0x1010, 0x0004);
+    la64m68_mem_write16(mem, 0x1012, 0x242f);   /* MOVE.L 4(A7),D2   */
+    la64m68_mem_write16(mem, 0x1014, 0x0004);
+    la64m68_mem_write16(mem, 0x1016, 0x4e72);   /* STOP              */
+    la64m68_mem_write16(mem, 0x1018, 0x2700);
+
+    la64m68_cpu cpu;
+    la64m68_cpu_reset(&cpu, mem, NULL);
+    for (int i = 0; i < 4; i++) la64m68_cpu_step(&cpu);
+
+    /* the location written and the location read back must be the same */
+    assert(la64m68_mem_read32(mem, 0x2004) == 1);
+    assert(cpu.regs[2] == 1);
+    /* and the value must live at base+4, not somewhere else */
+    assert(la64m68_mem_read32(mem, 0x2000) == 0);
+    assert(la64m68_mem_read32(mem, 0x2008) == 0);
+
+    la64m68_ram_memory_destroy(mem);
+    printf("test_core: d16(an) roundtrip ok\n");
+}
+
 int main(void)
 {
     test_reset_step();
@@ -1273,6 +1327,7 @@ int main(void)
     test_vaga_vertb();
     test_vaga_blitter();
     test_vaga_copper();
+    test_d16_an_roundtrip();
     printf("test_core: all ok\n");
     return 0;
 }

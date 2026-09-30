@@ -366,17 +366,31 @@ int la64m68_vaga_render(la64m68_vaga *v, uint8_t *rgb24, uint32_t stride,
     int depth = (con0 >> 12) & 7;
     int hires = (con0 & 0x8000) != 0;
     /* HAM and dual-playfield are not decoded yet: treat as a plain index */
-    if (depth < 1 || depth > 6) {
-        /* one-shot diagnosis: if the guest never enables a display we must
-         * be able to see that instead of guessing why the screen is empty */
-        static int told;
-        if (!told) {
-            told = 1;
-            la64m68_trace("vaga: no display configured (BPLCON0=%04x, "
-                          "depth=%d, DIWSTRT=%04x) -> nothing to render",
-                          con0, depth, v->regs[R_DIWSTRT / 2]);
+    if (depth > 6) return -1;          /* not a legal playfield depth */
+
+    /* depth 0 is NOT "no picture". With no bitplanes fetched the display
+     * outputs COLOR00 for the whole window -- a solid field. Refusing here
+     * is why an enabled-but-empty display showed nothing at all. */
+    if (depth == 0) {
+        uint32_t sw = hires ? 640u : 320u;
+        uint16_t ds = v->regs[R_DIWSTRT / 2], de = v->regs[R_DIWSTOP / 2];
+        uint32_t sh = ((de >> 8) - (ds >> 8)) & 0xffu;
+        if (sh == 0) sh = 256;
+        uint16_t c = v->regs[R_COLOR00 / 2];
+        uint8_t cr = (uint8_t)(((c >> 8) & 0xf) * 17);
+        uint8_t cg = (uint8_t)(((c >> 4) & 0xf) * 17);
+        uint8_t cb = (uint8_t)((c & 0xf) * 17);
+        for (uint32_t y = 0; y < sh; y++) {
+            uint8_t *dst = rgb24 + (size_t)y * stride;
+            for (uint32_t x = 0; x < sw; x++) {
+                dst[x * 3 + 0] = cr;
+                dst[x * 3 + 1] = cg;
+                dst[x * 3 + 2] = cb;
+            }
         }
-        return -1;
+        if (w) *w = sw;
+        if (h) *h = sh;
+        return 0;
     }
 
     uint32_t width  = hires ? 640u : 320u;
