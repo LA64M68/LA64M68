@@ -23,6 +23,7 @@ la64m68_fb *la64m68_fb_create(const char *backend, int width, int height)
     fb->present = null_present;
 
     int try_vc  = !strcmp(want, "auto") || !strcmp(want, "vc");
+    int try_fb  = !strcmp(want, "auto") || !strcmp(want, "fbdev");
     int try_x11 = !strcmp(want, "auto") || !strcmp(want, "x11");
 
 #ifdef LA64M68_HAVE_VC
@@ -43,7 +44,16 @@ la64m68_fb *la64m68_fb_create(const char *backend, int width, int height)
 #else
     (void)try_x11;
 #endif
-    la64m68_trace("fb: backend=%s -> null (vc/x11 pending)", want);
+    /* fbdev is "VideoCore direkt" in its classic form: a kernel running the
+     * bcm2835 framebuffer has /dev/fb0 and no /dev/dri at all, so the DRM
+     * presenter can never work there and dropping to null would mean we can
+     * never see what the guest draws. */
+    if (try_fb && la64m68_fb_fbdev_init(fb) == 0) {
+        fb->name = "fbdev";
+        la64m68_trace("fb: backend=fbdev %dx%d", width, height);
+        return fb;
+    }
+    la64m68_trace("fb: backend=%s -> null (no vc/x11/fbdev usable)", want);
     return fb;
 }
 

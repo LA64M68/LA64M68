@@ -1007,6 +1007,59 @@ static void test_vfs_names(void)
     printf("test_core: vfs names ok\n");
 }
 
+/* vAGA display decoding. The registers alone never show anything, so the
+ * decoder is pinned here before any peripheral work: if it computes the wrong
+ * pixels, everything downstream is pointless and invisible.
+ *
+ * Two bitplanes, lores, one identified byte at the row start. Index bit0
+ * comes from plane 1, bit1 from plane 2 -- so 0xAA/0x00 must yield the
+ * alternating colour 1,0,1,0... */
+static void test_vaga_render(void)
+{
+    la64m68_memory *mem = la64m68_ram_memory_create(0, 0x10000);
+    assert(mem);
+    la64m68_vaga v;
+    la64m68_vaga_init(&v);
+    la64m68_vaga_set_mem(&v, mem);
+
+    /* BPLCON0: depth 2, lores */
+    v.regs[0x100 / 2] = 0x2000;
+    /* display window: two rows, so the test stays small */
+    v.regs[0x08e / 2] = 0x0000;             /* DIWSTRT, vstart = 0 */
+    v.regs[0x090 / 2] = 0x0200;             /* DIWSTOP, vstop  = 2 */
+    /* bitplane pointers */
+    v.regs[0x0e0 / 2] = 0x0000; v.regs[0x0e2 / 2] = 0x1000;   /* plane 1 */
+    v.regs[0x0e4 / 2] = 0x0000; v.regs[0x0e6 / 2] = 0x2000;   /* plane 2 */
+    /* palette: 0 = black, 1 = red */
+    v.regs[0x180 / 2] = 0x000;
+    v.regs[0x182 / 2] = 0x700;
+
+    /* plane 1 row 0 starts with 0xAA, plane 2 stays clear */
+    la64m68_mem_write8(mem, 0x1000, 0xaa);
+    for (int i = 1; i < 40; i++) la64m68_mem_write8(mem, 0x1000 + i, 0x00);
+
+    static uint8_t out[320 * 2 * 3];
+    uint32_t w = 0, h = 0;
+    assert(la64m68_vaga_render(&v, out, 320 * 3, &w, &h) == 0);
+    assert(w == 320 && h == 2);
+
+    /* 0xAA = 10101010 -> pixel 0 is colour 1 (red), pixel 1 is colour 0 */
+    assert(out[0] == 0x77 && out[1] == 0x00 && out[2] == 0x00);   /* 7 * 17 */
+    assert(out[3] == 0x00 && out[4] == 0x00 && out[5] == 0x00);
+    assert(out[6] == 0x77 && out[7] == 0x00);      /* alternating */
+    /* second row has no plane data at 0x1000+40 -> all black */
+    uint8_t *row1 = out + 320 * 3;
+    assert(row1[0] == 0x00 && row1[1] == 0x00);
+
+    /* no display configured -> must refuse rather than invent a picture */
+    la64m68_vaga_init(&v);
+    la64m68_vaga_set_mem(&v, mem);
+    assert(la64m68_vaga_render(&v, out, 320 * 3, &w, &h) == -1);
+
+    la64m68_ram_memory_destroy(mem);
+    printf("test_core: vaga render ok\n");
+}
+
 int main(void)
 {
     test_reset_step();
@@ -1025,6 +1078,7 @@ int main(void)
     test_vblk();
     test_plugin_load();
     test_vfs_names();
+    test_vaga_render();
     printf("test_core: all ok\n");
     return 0;
 }

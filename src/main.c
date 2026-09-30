@@ -8,6 +8,7 @@
 #include "vhid.h"
 #include "vaga.h"
 #include "vblk.h"
+#include "vsplash.h"
 #include "vfs.h"
 #include "debug.h"
 #include "host.h"
@@ -88,6 +89,7 @@ static int load_raw(la64m68_memory *mem, const char *path, uint32_t addr,
     uint8_t buf[4096];
     size_t n;
     size_t total = 0;
+    uint32_t base = addr;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
         for (size_t i = 0; i < n; i++)
             la64m68_mem_write8(mem, addr + (uint32_t)i, buf[i]);
@@ -95,10 +97,13 @@ static int load_raw(la64m68_memory *mem, const char *path, uint32_t addr,
         total += n;
     }
     fclose(f);
-    fprintf(stderr, "la64m68: loaded %zu bytes at %08x\n", total, addr);
+    fprintf(stderr, "la64m68: loaded %zu bytes at %08x\n", total, base);
+    /* The reset SSP/PC live in the ROM head (offset 0 and 4). Reading them
+     * from `addr` -- which sits just past the image after the loop -- took
+     * the wrong bytes entirely. */
     if (vectors) {
-        la64m68_mem_write32(mem, 0, la64m68_mem_read32(mem, addr));
-        la64m68_mem_write32(mem, 4, la64m68_mem_read32(mem, addr + 4));
+        la64m68_mem_write32(mem, 0, la64m68_mem_read32(mem, base));
+        la64m68_mem_write32(mem, 4, la64m68_mem_read32(mem, base + 4));
     }
     return 0;
 }
@@ -124,12 +129,23 @@ static int load_standard_rom(la64m68_memory *mem, const char *path, int kind)
     fclose(f);
     if (sz <= 0) return -1;
 
+    /* Placement is derived from the ROM itself, not from a size table: the
+     * reset PC in the head says where the image is decoded. A 512 KiB
+     * Kickstart carries PC=0x00f80100 and must sit at 0xF80000 -- the naive
+     * "bigger ROM goes lower" rule would have put it at 0xF00000 and left
+     * the reset vector pointing outside the image. */
     uint32_t base;
     if (kind == 1) {                       /* Atari TOS: always 0xE00000 */
         base = 0x00E00000u;
-    } else {                               /* Amiga Kickstart: by ROM size */
-        base = sz > 512 * 1024 ? 0x00E00000u :
-               sz > 256 * 1024 ? 0x00F00000u : 0x00F80000u;
+    } else {
+        FILE *g = fopen(path, "rb");
+        uint8_t head[8] = {0};
+        if (g) { if (fread(head, 1, 8, g) != 8) { /* short ROM */ } fclose(g); }
+        uint32_t reset_pc = ((uint32_t)head[4] << 24) | ((uint32_t)head[5] << 16) |
+                            ((uint32_t)head[6] << 8) | head[7];
+        uint32_t sz32 = (uint32_t)sz;
+        uint32_t mask = sz32 - 1;               /* ROM size is a power of two */
+        base = (sz32 & mask) == 0 && sz32 ? (reset_pc & ~mask) : 0x00F80000u;
     }
     fprintf(stderr, "la64m68: %s %s (%ld bytes) at %08x\n",
             kind == 1 ? "TOS" : "Kickstart", path, sz, base);
@@ -293,6 +309,7 @@ int main(int argc, char **argv)
                           la64m68_pis_chipset_mem(pis);
     if (!chipset_claimed && o.chipset) {
         la64m68_vaga_init(&vaga);
+        la64m68_vaga_set_mem(&vaga, rt);   /* bitplane fetches read guest RAM */
         vaga_mem = la64m68_vaga_memory(&vaga);
         if (vaga_mem &&
             route(rt, LA64M68_VAGA_BASE, LA64M68_VAGA_SIZE, vaga_mem,
@@ -384,6 +401,23 @@ int main(int argc, char **argv)
         goto out;
     }
 
+    /* Splash on the primary surface (VideoCore via vRTG) before the guest
+     * draws anything. Silent when the assets are absent. */
+    if (o.vrtg && la64m68_vsplash_load(root) == 0) {
+        static uint8_t splash[LA64M68_VSPLASH_WIDTH * LA64M68_VSPLASH_HEIGHT * 3];
+        la64m68_vsplash_render_rgb24(splash, LA64M68_VSPLASH_WIDTH * 3);
+        glue.fb = la64m68_fb_create(glue.backend, LA64M68_VSPLASH_WIDTH,
+                                    LA64M68_VSPLASH_HEIGHT);
+        if (glue.fb) {
+            glue.w = LA64M68_VSPLASH_WIDTH;
+            glue.h = LA64M68_VSPLASH_HEIGHT;
+            la64m68_fb_present(glue.fb, splash, 24);
+            fprintf(stderr, "la64m68: splash on the primary surface "
+                            "(%dx%d, 16 colours, 3-bit channel steps)\n",
+                            LA64M68_VSPLASH_WIDTH, LA64M68_VSPLASH_HEIGHT);
+        }
+    }
+
     la64m68_cpu cpu;
     /* the architecture backend: Amiga, Atari, or none (pure core) */
     la64m68_plugin *plugin = NULL;
@@ -418,6 +452,17 @@ int main(int argc, char **argv)
             while ((rl = la64m68_net_recv(net, fr, sizeof(fr))) > 0)
                 la64m68_vnic_rx(&vnic, fr, (size_t)rl);
         }
+        /* Emulated chipset: turn the guest's playfield into a picture and
+         * hand it to the presenter. fb_glue_present() re-creates the surface
+         * when the guest changes resolution, so the two sizes (splash 320x200
+         * vs. playfield 320x256) do not have to agree up front. */
+        if (vaga_mem && (i & 0x3ff) == 0) {
+            static uint8_t frame[640 * 256 * 3];
+            uint32_t fw = 0, fh = 0;
+            if (la64m68_vaga_render(&vaga, frame, 640 * 3, &fw, &fh) == 0)
+                fb_glue_present(&glue, frame, fw, fh, 24);
+        }
+
         if (la64m68_cpu_step(&cpu) != 0) break;
     }
 

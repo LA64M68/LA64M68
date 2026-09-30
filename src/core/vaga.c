@@ -163,3 +163,94 @@ void la64m68_vaga_tick(la64m68_vaga *v, int cycles)
 {
     v->vpos += (uint32_t)cycles;      /* coarse: vpos advances with cycles */
 }
+
+/* ---- display decoding ------------------------------------------------- */
+
+/* custom-register word offsets, as written in the hardware manual */
+#define R_BPLCON0   0x100
+#define R_DIWSTRT   0x08E
+#define R_DIWSTOP   0x090
+#define R_BPL1PTH   0x0E0
+#define R_BPL1MOD   0x108
+#define R_BPL2MOD   0x10A
+#define R_COLOR00   0x180
+
+void la64m68_vaga_set_mem(la64m68_vaga *v, la64m68_memory *m)
+{
+    if (v) v->mem = m;
+}
+
+int la64m68_vaga_render(la64m68_vaga *v, uint8_t *rgb24, uint32_t stride,
+                        uint32_t *w, uint32_t *h)
+{
+    if (!v || !v->mem || !rgb24) return -1;
+
+    uint16_t con0 = v->regs[R_BPLCON0 / 2];
+    int depth = (con0 >> 12) & 7;
+    int hires = (con0 & 0x8000) != 0;
+    /* HAM and dual-playfield are not decoded yet: treat as a plain index */
+    if (depth < 1 || depth > 6) {
+        /* one-shot diagnosis: if the guest never enables a display we must
+         * be able to see that instead of guessing why the screen is empty */
+        static int told;
+        if (!told) {
+            told = 1;
+            la64m68_trace("vaga: no display configured (BPLCON0=%04x, "
+                          "depth=%d, DIWSTRT=%04x) -> nothing to render",
+                          con0, depth, v->regs[R_DIWSTRT / 2]);
+        }
+        return -1;
+    }
+
+    uint32_t width  = hires ? 640u : 320u;
+    uint16_t diwstrt = v->regs[R_DIWSTRT / 2], diwstop = v->regs[R_DIWSTOP / 2];
+    uint32_t height = ((diwstop >> 8) - (diwstrt >> 8)) & 0xffu;
+    if (height == 0) height = 256;
+
+    uint32_t row_bytes = width / 8;
+
+    /* bitplane pointers: BPL1PTH/L .. BPL6PTH/L, one long each */
+    uint32_t ptr[6];
+    for (int p = 0; p < 6; p++)
+        ptr[p] = ((uint32_t)v->regs[(R_BPL1PTH + p * 4) / 2] << 16) |
+                 v->regs[(R_BPL1PTH + p * 4 + 2) / 2];
+
+    /* odd planes use BPL1MOD, even planes BPL2MOD */
+    int mod[6];
+    for (int p = 0; p < 6; p++)
+        mod[p] = (int16_t)v->regs[((p & 1) ? R_BPL2MOD : R_BPL1MOD) / 2];
+
+    /* 12-bit 0xRGB palette, one entry per index */
+    uint8_t pal[64][3];
+    for (int i = 0; i < 64; i++) {
+        uint16_t c = v->regs[(R_COLOR00 + i * 2) / 2];
+        pal[i][0] = (uint8_t)(((c >> 8) & 0xf) * 17);
+        pal[i][1] = (uint8_t)(((c >> 4) & 0xf) * 17);
+        pal[i][2] = (uint8_t)((c & 0xf) * 17);
+    }
+
+    for (uint32_t y = 0; y < height; y++) {
+        uint8_t *dst = rgb24 + (size_t)y * stride;
+        /* one byte per bitplane for the current 8-pixel group */
+        uint8_t row[6][80];                        /* 640/8 = 80 bytes */
+        for (int p = 0; p < depth; p++) {
+            if (row_bytes > sizeof(row[0])) return -1;
+            for (uint32_t i = 0; i < row_bytes; i++)
+                row[p][i] = la64m68_mem_read8(v->mem, ptr[p] + i);
+            ptr[p] += row_bytes + (uint32_t)mod[p];
+        }
+        for (uint32_t x = 0; x < width; x++) {
+            uint32_t byte = x >> 3;
+            int bit = 7 - (int)(x & 7);
+            int idx = 0;
+            for (int p = 0; p < depth; p++)
+                if ((row[p][byte] >> bit) & 1) idx |= 1 << p;
+            dst[x * 3 + 0] = pal[idx][0];
+            dst[x * 3 + 1] = pal[idx][1];
+            dst[x * 3 + 2] = pal[idx][2];
+        }
+    }
+    if (w) *w = width;
+    if (h) *h = height;
+    return 0;
+}

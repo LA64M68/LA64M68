@@ -18,6 +18,7 @@ typedef struct la64m68_vaga {
     uint32_t vpos;                          /* free-running VPOS counter */
     uint16_t intreq;                        /* latched INTREQ bits */
     int      enabled;
+    la64m68_memory *mem;   /* guest RAM, for bitplane fetches */
 } la64m68_vaga;
 
 void la64m68_vaga_init(la64m68_vaga *v);
@@ -34,5 +35,25 @@ void la64m68_vaga_raise(la64m68_vaga *v, int bit);
 int  la64m68_vaga_ipl(la64m68_vaga *v);
 /* Advance the free-running vertical counter. */
 void la64m68_vaga_tick(la64m68_vaga *v, int cycles);
+
+/* ---- display decoding -------------------------------------------------
+ *
+ * The registers alone do not show anything: something has to turn the
+ * bitplanes the guest set up into pixels. This walks BPLCON0/BPLxPT/COLORxx
+ * and produces a chunky RGB frame, which the presenter chain then scales to
+ * VideoCore or the Amiga/Atari fallback.
+ *
+ * Scope: OCS-style playfield, 1..6 bitplanes, lores and hires. HAM, EHB and
+ * dual-playfield are not decoded yet and fall back to the plain index.
+ */
+
+/* The bitplane fetches read guest RAM. */
+void la64m68_vaga_set_mem(la64m68_vaga *v, la64m68_memory *m);
+
+/* Render the current playfield into `rgb24` (stride in bytes).
+ * Returns 0 and stores the picture size when a display is set up,
+ * -1 when the guest has not configured one. */
+int la64m68_vaga_render(la64m68_vaga *v, uint8_t *rgb24, uint32_t stride,
+                        uint32_t *w, uint32_t *h);
 
 #endif

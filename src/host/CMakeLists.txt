@@ -2,6 +2,8 @@ add_library(la64m68_host STATIC
     host.c
     vm.c
     fb.c
+    fb_fbdev.c
+    fb_blit.c
     input.c
     net.c
     pis.c
