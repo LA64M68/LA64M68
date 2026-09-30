@@ -7,9 +7,13 @@ see `LICENSE` and `NON-PROFIT`.
 
 **Status:** in development.
 
-This repository currently carries the project documentation and licence
-notices. The source tree is published separately and incrementally; the
-layout described below is the layout it arrives in.
+**Experimental — provided as-is.** This is work in progress: expect rough
+edges, incomplete areas and change. It carries **no warranty** and **no
+support commitment**, in line with the "AS IS" terms of `LICENSE`. Use it on
+hardware you can afford to have misbehave.
+
+This repository carries the documentation, the licence notices and the
+source tree. Areas still in progress are listed under *Upcoming / Next*.
 
 ---
 
