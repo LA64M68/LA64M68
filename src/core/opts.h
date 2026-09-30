@@ -23,6 +23,7 @@ typedef struct la64m68_opts {
     int          disk_ro;   /* attach the disk read-only */
     const char *plugin;     /* backend module, e.g. plugins/libla64m68_amiga.so */
     const char *fs;          /* host directory exposed to the guest */
+    const char *display;     /* output target: videocore | amiga-gfx | atari-gfx */
     long         ram_kb;    /* guest RAM in KiB */
     long         max_steps; /* instructions to run, 0 = until signalled */
     /* PiS passthrough (real Amiga bus) */

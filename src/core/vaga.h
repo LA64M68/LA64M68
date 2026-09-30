@@ -56,4 +56,14 @@ void la64m68_vaga_set_mem(la64m68_vaga *v, la64m68_memory *m);
 int la64m68_vaga_render(la64m68_vaga *v, uint8_t *rgb24, uint32_t stride,
                         uint32_t *w, uint32_t *h);
 
+/* Amiga Denise output: the playfield in the hardware's own bitplane layout
+ * (all planes of a row together), which is what the fallback display needs.
+ * `out` must hold width/8 * height * depth bytes. */
+int la64m68_vaga_render_planar(la64m68_vaga *v, uint8_t *out,
+                               uint32_t *w, uint32_t *h, int *depth);
+
+/* Atari ST output: the same planes interleaved as 16-bit words per row. */
+int la64m68_vaga_render_st(la64m68_vaga *v, uint8_t *out,
+                           uint32_t *w, uint32_t *h, int *depth);
+
 #endif

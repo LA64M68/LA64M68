@@ -8,6 +8,7 @@
 #include "vhid.h"
 #include "vaga.h"
 #include "vblk.h"
+#include "vcia.h"
 #include "vsplash.h"
 #include "vfs.h"
 #include "debug.h"
@@ -98,12 +99,14 @@ static int load_raw(la64m68_memory *mem, const char *path, uint32_t addr,
     }
     fclose(f);
     fprintf(stderr, "la64m68: loaded %zu bytes at %08x\n", total, base);
-    /* The reset SSP/PC live in the ROM head (offset 0 and 4). Reading them
-     * from `addr` -- which sits just past the image after the loop -- took
-     * the wrong bytes entirely. */
+    /* The ROM head is the whole vector table, not just SSP/PC. The Amiga
+     * overlays the ROM over 0x000000 at reset for exactly this reason; without
+     * it every interrupt vector reads 0 and the CPU jumps to address 0, then
+     * executes open bus and runs away. Copying the first 256 vectors gives the
+     * guest its interrupt table. */
     if (vectors) {
-        la64m68_mem_write32(mem, 0, la64m68_mem_read32(mem, base));
-        la64m68_mem_write32(mem, 4, la64m68_mem_read32(mem, base + 4));
+        for (uint32_t i = 0; i < 256 * 4; i++)
+            la64m68_mem_write8(mem, i, la64m68_mem_read8(mem, base + i));
     }
     return 0;
 }
@@ -209,8 +212,12 @@ int main(int argc, char **argv)
     la64m68_vnic    vnic;
     la64m68_vhid    vhid;
     la64m68_vaga    vaga;
+    la64m68_vcia    cia_a, cia_b;
+    la64m68_memory *cia_mem[2] = { NULL, NULL };
     la64m68_vblk    vblk;
+    int fallback_told = 0;
     la64m68_memory *vblk_regs = NULL;
+    la64m68_memory *rom_mem  = NULL;
     la64m68_vfs    vfs;
     la64m68_memory *vfs_regs = NULL;
     fb_glue         glue      = { NULL, NULL, 0, 0, NULL };
@@ -233,6 +240,19 @@ int main(int argc, char **argv)
     if (pis_variant < 0) {
         fprintf(stderr, "la64m68: --pis-variant '%s' is not one of "
                         "auto|classic|32|32lite|pistormx\n", o.pis_variant);
+        return 2;
+    }
+
+    /* Which surface gets the picture. `amiga-gfx`/`atari-gfx` mean the
+     * fallback hardware draws it, so we must NOT also push a frame to the
+     * host surface -- two owners of one screen is how you get a garbled
+     * picture. */
+    int disp_host = strcmp(o.display, "videocore") == 0;
+    if (!disp_host &&
+        strcmp(o.display, "amiga-gfx") != 0 &&
+        strcmp(o.display, "atari-gfx") != 0) {
+        fprintf(stderr, "la64m68: --display '%s' is videocore|amiga-gfx|atari-gfx\n",
+                o.display);
         return 2;
     }
 
@@ -269,7 +289,11 @@ int main(int argc, char **argv)
                             "transfer is performed and no FPGA programming is "
                             "allowed; pass --pis-arm to attach to the bus\n");
         pis = la64m68_pis_open(o.pis_arm, pis_variant);
-        if (o.fpga_bitstream && la64m68_pis_present(pis)) {
+        /* Provisioning must NOT require a working FPGA: `present` is only
+         * set once the chip answers, and an unprogrammed one answers 0xFFFF
+         * by definition. Gating the load on it made the bootstrapping
+         * impossible. The arming gate is the safety here. */
+        if (o.fpga_bitstream && pis && la64m68_pis_armed(pis)) {
             if (la64m68_pis_fpga_load(pis, o.fpga_bitstream) == 0)
                 printf("la64m68: PiS FPGA loaded, status=%04x\n",
                        la64m68_pis_status(pis));
@@ -298,8 +322,28 @@ int main(int argc, char **argv)
                 rc = 1;
                 goto out;
             }
+            /* Without releasing the CPU every bus cycle times out: the
+             * processor sits in HALT and never completes the transfer. */
+            if (la64m68_pis_cpu_release(pis) != 0)
+                fprintf(stderr, "la64m68: could not release the 68k\n");
             printf("la64m68: PiS passthrough active (ARMED)\n");
         }
+    }
+
+    /* CIA-A (0xBFE001) and CIA-B (0xBFD000): the guest's timer tick. Without
+     * them Kickstart stalls before it ever enables the display. Routed here,
+     * below the PiS windows, so real hardware still wins when it is present. */
+    la64m68_vcia_init(&cia_a, 1);
+    la64m68_vcia_init(&cia_b, 0);
+    cia_mem[0] = la64m68_vcia_memory(&cia_a);
+    cia_mem[1] = la64m68_vcia_memory(&cia_b);
+    if (!cia_mem[0] || !cia_mem[1] ||
+        route(rt, LA64M68_VCIA_A_BASE & ~0xfffu, LA64M68_VCIA_SPAN,
+              cia_mem[0], "cia-a") != 0 ||
+        route(rt, LA64M68_VCIA_B_BASE, LA64M68_VCIA_SPAN,
+              cia_mem[1], "cia-b") != 0) {
+        rc = 1;
+        goto out;
     }
 
     /* Denise/AGA-style chipset fallback -- lowest priority, only when no
@@ -360,6 +404,25 @@ int main(int argc, char **argv)
         }
     }
 
+    /* A ROM needs somewhere to live. The standard bases (0xE00000 for TOS,
+     * 0xF00000/0xF80000 for Kickstart) all sit outside guest RAM, so without
+     * a routed region there the loader writes into nothing and every vector
+     * reads back zero -- which looks like a bad ROM instead of a missing
+     * window. 2 MiB covers every standard base. */
+    rom_mem = la64m68_ram_memory_create(0x00E00000u, 0x200000u);
+    if (!rom_mem || route(rt, 0x00E00000u, 0x200000u, rom_mem, "rom space") != 0) {
+        fprintf(stderr, "la64m68: cannot create the ROM window\n");
+        rc = 1;
+        goto out;
+    }
+
+    /* Reset vectors. These go in BEFORE any ROM is loaded, not after: a ROM
+     * brings its own vector table and must be the last writer. Placing these
+     * afterwards overwrote the Kickstart entry point and sent the CPU to
+     * 0x00000800 -- inside RAM -- from where it executed open bus forever. */
+    la64m68_mem_write32(rt, 0x00000000, (uint32_t)o.ram_kb * 1024);
+    la64m68_mem_write32(rt, 0x00000004, 0x00000800);
+
     /* ROM images: --kickstart / --tos place themselves at the documented
      * standard bases, --rom takes an explicit address. */
     if (o.kickstart && load_standard_rom(rt, o.kickstart, 0) < 0) {
@@ -392,9 +455,6 @@ int main(int argc, char **argv)
         }
     }
 
-    /* defaults until a ROM image provides vectors */
-    la64m68_mem_write32(rt, 0x00000000, (uint32_t)o.ram_kb * 1024);
-    la64m68_mem_write32(rt, 0x00000004, 0x00000800);
     if (o.rom &&
         load_raw(rt, o.rom, (uint32_t)o.rom_addr, o.rom_vectors) < 0) {
         rc = 1;
@@ -403,7 +463,7 @@ int main(int argc, char **argv)
 
     /* Splash on the primary surface (VideoCore via vRTG) before the guest
      * draws anything. Silent when the assets are absent. */
-    if (o.vrtg && la64m68_vsplash_load(root) == 0) {
+    if (o.vrtg && disp_host && la64m68_vsplash_load(root) == 0) {
         static uint8_t splash[LA64M68_VSPLASH_WIDTH * LA64M68_VSPLASH_HEIGHT * 3];
         la64m68_vsplash_render_rgb24(splash, LA64M68_VSPLASH_WIDTH * 3);
         glue.fb = la64m68_fb_create(glue.backend, LA64M68_VSPLASH_WIDTH,
@@ -438,12 +498,19 @@ int main(int argc, char **argv)
      * A bounded count is for automated smoke runs only. */
     for (long i = 0; (o.max_steps <= 0 || i < o.max_steps) && !g_stop; i++) {
         if (input && (i & 0xfff) == 0) la64m68_input_poll(input);
+        /* advance the CIA timers and take the highest requested level */
+        la64m68_vcia_tick(&cia_a, 64);
+        la64m68_vcia_tick(&cia_b, 64);
         if ((i & 0xff) == 0) {
             int ipl = la64m68_pis_ipl_level(pis);
             if (vaga_mem) {
                 int vi = la64m68_vaga_ipl(&vaga);
                 if (vi > ipl) ipl = vi;
             }
+            int ca = la64m68_vcia_ipl(&cia_a);
+            if (ca > ipl) ipl = ca;
+            int cb = la64m68_vcia_ipl(&cia_b);
+            if (cb > ipl) ipl = cb;
             la64m68_cpu_ipl(&cpu, ipl);
         }
         if (net && (i & 0xfff) == 0) {
@@ -459,8 +526,26 @@ int main(int argc, char **argv)
         if (vaga_mem && (i & 0x3ff) == 0) {
             static uint8_t frame[640 * 256 * 3];
             uint32_t fw = 0, fh = 0;
-            if (la64m68_vaga_render(&vaga, frame, 640 * 3, &fw, &fh) == 0)
-                fb_glue_present(&glue, frame, fw, fh, 24);
+            if (la64m68_vaga_render(&vaga, frame, 640 * 3, &fw, &fh) == 0) {
+                if (disp_host) {
+                    fb_glue_present(&glue, frame, fw, fh, 24);
+                } else {
+                    /* fallback display: emit the layout the target hardware
+                     * wants instead of a host frame */
+                    static uint8_t planar[640 * 256 * 6 / 8];
+                    uint32_t pw = 0, ph = 0; int pdepth = 0;
+                    int ok = strcmp(o.display, "atari-gfx") == 0
+                        ? la64m68_vaga_render_st(&vaga, planar, &pw, &ph, &pdepth)
+                        : la64m68_vaga_render_planar(&vaga, planar, &pw, &ph, &pdepth);
+                    if (ok == 0 && !fallback_told) {
+                        fallback_told = 1;
+                        fprintf(stderr, "la64m68: display=%s -> %ux%u, %d bitplanes "
+                                        "(%u bytes planar)\n",
+                                o.display, pw, ph, pdepth,
+                                (unsigned)(pw / 8 * ph * (uint32_t)pdepth));
+                    }
+                }
+            }
         }
 
         if (la64m68_cpu_step(&cpu) != 0) break;
@@ -483,11 +568,14 @@ out:
     la64m68_net_destroy(net);
     if (vregs[1]) la64m68_vnic_regs_destroy(vregs[1]);
     if (vregs[2]) la64m68_vhid_regs_destroy(vregs[2]);
+    la64m68_ram_memory_destroy(rom_mem);
     if (vblk_regs) {
         la64m68_vblk_regs_destroy(vblk_regs);
         la64m68_vblk_src_close(&vblk.src);
     }
     if (vfs_regs) la64m68_vfs_regs_destroy(vfs_regs);
+    if (cia_mem[0]) la64m68_vcia_mem_destroy(cia_mem[0]);
+    if (cia_mem[1]) la64m68_vcia_mem_destroy(cia_mem[1]);
     la64m68_host_destroy(host);
     return rc;
 }

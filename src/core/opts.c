@@ -19,6 +19,7 @@ void la64m68_opts_defaults(la64m68_opts *o)
         .disk_ro        = 0,
         .plugin         = NULL,
         .fs             = NULL,
+        .display        = "videocore",
         .ram_kb         = 1024,
         .max_steps      = 0,
         .pis            = 1,
@@ -78,6 +79,7 @@ static const struct {
     { "disk",           offsetof(la64m68_opts, disk),           V_STR,  0, 0 },
     { "plugin",         offsetof(la64m68_opts, plugin),         V_STR,  0, 0 },
     { "fs",             offsetof(la64m68_opts, fs),             V_STR,  0, 0 },
+    { "display",        offsetof(la64m68_opts, display),        V_STR,  0, 0 },
     { "fpga-bitstream", offsetof(la64m68_opts, fpga_bitstream), V_STR,  0, 0 },
     { "pis-variant",    offsetof(la64m68_opts, pis_variant),    V_STR,  0, 0 },
     { "vrtg-backend",   offsetof(la64m68_opts, vrtg_backend),   V_STR,  0, 0 },
@@ -129,6 +131,11 @@ void la64m68_opts_usage(const char *prog)
 "                         Example: --plugin plugins/libla64m68_amiga.so\n"
 "  --disk KIND:PATH       storage: raw:file.img or qcow2:file.qcow2\n"
 "  --fs DIR               expose a host directory to the guest by name\n"
+"\n"
+"display output\n"
+"  --display NAME         videocore   host surface (/dev/fb0, DRM)  [default]\n"
+"                         amiga-gfx   Amiga Denise planar output (fallback)\n"
+"                         atari-gfx   Atari ST interleaved output (fallback)\n"
 "  --disk-ro              attach the disk read-only\n"
 "  --kickstart FILE       Amiga Kickstart ROM (native format, auto-placed)\n"
 "  --tos FILE             Atari TOS ROM (native format)\n"

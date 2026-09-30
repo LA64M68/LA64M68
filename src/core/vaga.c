@@ -254,3 +254,66 @@ int la64m68_vaga_render(la64m68_vaga *v, uint8_t *rgb24, uint32_t stride,
     if (h) *h = height;
     return 0;
 }
+
+/* ---- fallback display layouts -----------------------------------------
+ *
+ * Both formats are the same playfield, only arranged the way the target
+ * hardware wants it. Denise takes the planes of a row consecutively, the
+ * Atari ST interleaves them as words. */
+
+static int vaga_layout(la64m68_vaga *v, uint32_t *w, uint32_t *h, int *depth,
+                       uint32_t *ptr, int *mod)
+{
+    uint16_t con0 = v->regs[R_BPLCON0 / 2];
+    int d = (con0 >> 12) & 7;
+    if (d < 1 || d > 6) return -1;
+    uint32_t width = (con0 & 0x8000) ? 640u : 320u;
+    uint16_t ds = v->regs[R_DIWSTRT / 2], de = v->regs[R_DIWSTOP / 2];
+    uint32_t height = ((de >> 8) - (ds >> 8)) & 0xffu;
+    if (height == 0) height = 256;
+    for (int p = 0; p < 6; p++)
+        ptr[p] = ((uint32_t)v->regs[(R_BPL1PTH + p * 4) / 2] << 16) |
+                 v->regs[(R_BPL1PTH + p * 4 + 2) / 2];
+    for (int p = 0; p < 6; p++)
+        mod[p] = (int16_t)v->regs[((p & 1) ? R_BPL2MOD : R_BPL1MOD) / 2];
+    *w = width; *h = height; *depth = d;
+    return 0;
+}
+
+int la64m68_vaga_render_planar(la64m68_vaga *v, uint8_t *out,
+                               uint32_t *w, uint32_t *h, int *depth)
+{
+    if (!v || !v->mem || !out) return -1;
+    uint32_t width, height; int d, mod[6]; uint32_t ptr[6];
+    if (vaga_layout(v, &width, &height, &d, ptr, mod) != 0) return -1;
+    uint32_t row_bytes = width / 8;
+    uint8_t *o = out;
+    for (uint32_t y = 0; y < height; y++) {
+        for (int p = 0; p < d; p++) {
+            for (uint32_t i = 0; i < row_bytes; i++)
+                *o++ = la64m68_mem_read8(v->mem, ptr[p] + i);
+            ptr[p] += row_bytes + (uint32_t)mod[p];
+        }
+    }
+    *w = width; *h = height; *depth = d;
+    return 0;
+}
+
+int la64m68_vaga_render_st(la64m68_vaga *v, uint8_t *out,
+                           uint32_t *w, uint32_t *h, int *depth)
+{
+    if (!v || !v->mem || !out) return -1;
+    uint32_t width, height; int d, mod[6]; uint32_t ptr[6];
+    if (vaga_layout(v, &width, &height, &d, ptr, mod) != 0) return -1;
+    uint32_t row_bytes = width / 8;
+    uint8_t *o = out;
+    for (uint32_t y = 0; y < height; y++) {
+        for (int p = 0; p < d; p++) {
+            for (uint32_t i = 0; i < row_bytes; i++)
+                *o++ = la64m68_mem_read8(v->mem, ptr[p] + i);
+            ptr[p] += row_bytes + (uint32_t)mod[p];
+        }
+    }
+    *w = width; *h = height; *depth = d;
+    return 0;
+}

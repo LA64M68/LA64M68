@@ -1310,8 +1310,17 @@ static int op_ded(la64m68_cpu *c, uint16_t op, int which) /* which: 0=OR 1=AND 2
     int dir = (op >> 8) & 1;
     int dr = (op >> 9) & 7;
     uint32_t a = 0, ea;
-    int mem = rmw_read(c, op, size, &a, &ea);
-    if (mem < 0) return -1;
+    int mem;
+    if (!dir && which != 4) {
+        /* <ea> op Dn -> Dn: the operand is only read, so a read-only EA such
+         * as #imm is legal here. Asking rmw_read() for a write-back slot
+         * rejected exactly those and turned ADD.L #imm,Dn into a Line-F. */
+        ea = ea_read(c, op, size);
+        mem = 0;
+    } else {
+        mem = rmw_read(c, op, size, &a, &ea);
+        if (mem < 0) return -1;
+    }
     uint32_t dn = c->regs[dr];
     uint32_t mask = mask_of(size);
     dn &= mask;

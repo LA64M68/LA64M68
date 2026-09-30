@@ -96,6 +96,13 @@ int           la64m68_pis_fpga_load(la64m68_pis *p, const char *path);
 /* Raw FPGA STATUS register read (REG_STATUS); -1 when not mapped. */
 int           la64m68_pis_status(la64m68_pis *p);
 
+/* Release the 68k from reset: assert RESET+HALT briefly, then let go.
+ *
+ * Without this the processor never completes a bus cycle -- every access runs
+ * into the TXN timeout, which is exactly what STATUS_HALT reported. Only
+ * meaningful once the FPGA is programmed. */
+int la64m68_pis_cpu_release(la64m68_pis *p);
+
 /* Read IPL0-2 lines (active low) -> 68k interrupt level 0-7 (0=none). */
 int           la64m68_pis_ipl_level(la64m68_pis *p);
 

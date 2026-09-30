@@ -12,6 +12,7 @@ add_library(la64m68_core STATIC
     vblk.c
     vblk_qcow2.c
     vfs.c
+    vcia.c
     vsplash.c
 )
 

@@ -83,6 +83,12 @@ static uint32_t dt_periph_base(void)
 #define REG_STATUS   4
 #define REG_CONTROL  4
 
+#define CONTROL_REQ_BM      (1u << 0)
+#define CONTROL_DRIVE_RESET (1u << 1)
+#define CONTROL_DRIVE_HALT  (1u << 2)
+#define CONTROL_DRIVE_INT2  (1u << 3)
+#define CONTROL_DRIVE_INT6  (1u << 4)
+
 #define TXN_SZ_SHIFT 8
 #define TXN_RW_READ  (1u << 10)
 #define TXN_FC_SHIFT 11
@@ -334,21 +340,24 @@ static void pis_bus_write(la64m68_pis *p, uint32_t addr, uint32_t v, int size)
     p->poll_txn = 1;
 }
 
-/* generic façade: offset = guest addr - window base, passed via ctx pair */
+/* Window facade. The router hands every sub-memory the ABSOLUTE guest
+ * address, so the base must not be added again -- doing so wrote to
+ * base+addr (0x00dff000 + 0x00dff180 = 0x01bfe180) and every cycle timed
+ * out on an address that does not exist. */
 typedef struct { la64m68_pis *p; uint32_t base; } pis_win;
 
 static uint8_t  pw_r8(void *c, uint32_t a)
-{ pis_win *w = c; return (uint8_t)pis_bus_read(w->p, w->base + a, 1); }
+{ pis_win *w = c; return (uint8_t)pis_bus_read(w->p, a, 1); }
 static uint16_t pw_r16(void *c, uint32_t a)
-{ pis_win *w = c; return (uint16_t)pis_bus_read(w->p, w->base + a, 2); }
+{ pis_win *w = c; return (uint16_t)pis_bus_read(w->p, a, 2); }
 static uint32_t pw_r32(void *c, uint32_t a)
-{ pis_win *w = c; return (uint32_t)pis_bus_read(w->p, w->base + a, 4); }
+{ pis_win *w = c; return (uint32_t)pis_bus_read(w->p, a, 4); }
 static void pw_w8(void *c, uint32_t a, uint8_t v)
-{ pis_win *w = c; pis_bus_write(w->p, w->base + a, v, 1); }
+{ pis_win *w = c; pis_bus_write(w->p, a, v, 1); }
 static void pw_w16(void *c, uint32_t a, uint16_t v)
-{ pis_win *w = c; pis_bus_write(w->p, w->base + a, v, 2); }
+{ pis_win *w = c; pis_bus_write(w->p, a, v, 2); }
 static void pw_w32(void *c, uint32_t a, uint32_t v)
-{ pis_win *w = c; pis_bus_write(w->p, w->base + a, v, 4); }
+{ pis_win *w = c; pis_bus_write(w->p, a, v, 4); }
 
 static la64m68_memory *mk_win(la64m68_pis *p, uint32_t base)
 {
@@ -455,12 +464,21 @@ la64m68_pis *la64m68_pis_open(int arm, int variant)
      * FPGA answering -> stay absent (GPIO header alone is not proof). */
     uint32_t st = reg_read(p, REG_STATUS);
     if (st == 0xffff) {
-        la64m68_trace("pis: gpiomem ok but FPGA status=ffff -> absent");
-        bus_release(p);
-        munmap(g, 0x1000);
-        close(fd);
-        p->fd = -1;
-        p->gpio = NULL;
+        /* An unprogrammed FPGA answers 0xFFFF. Tearing the mapping down here
+         * made provisioning impossible -- the loader needs those pins to put
+         * the bitstream in. Keep it when the operator armed the bus, so the
+         * chip can be brought up; `present` still stays 0. */
+        if (!p->armed) {
+            la64m68_trace("pis: gpiomem ok but FPGA status=ffff -> absent");
+            bus_release(p);
+            munmap(g, 0x1000);
+            close(fd);
+            p->fd = -1;
+            p->gpio = NULL;
+            return p;
+        }
+        la64m68_trace("pis: FPGA status=ffff (unprogrammed) -- armed, keeping "
+                      "the pins so it can be provisioned");
         return p;
     }
     p->present = 1;
@@ -477,6 +495,27 @@ la64m68_pis *la64m68_pis_open(int arm, int variant)
 int la64m68_pis_present(const la64m68_pis *p)
 {
     return p ? p->present : 0;
+}
+
+int la64m68_pis_cpu_release(la64m68_pis *p)
+{
+    if (!p || !p->gpio || !p->armed) return -1;
+    /* CONTROL shares the register slot with STATUS, and bit 15 is NOT data:
+     * it selects whether the remaining bits are SET (1) or CLEARED (0).
+     * Writing the raw value does nothing at all -- which is why HALT stayed
+     * asserted no matter what we sent.
+     *
+     * Sequence and timing follow ps_protocol.c ps_pulse_reset(): claim bus
+     * mastery first, then hold RESET long enough to be seen. */
+    reg_write(p, REG_CONTROL, 0x8000u | CONTROL_REQ_BM);   /* request BM */
+    usleep(100000);
+    reg_write(p, REG_CONTROL, 0x8000u | CONTROL_DRIVE_RESET);
+    usleep(150000);
+    reg_write(p, REG_CONTROL, CONTROL_DRIVE_RESET);        /* clear it */
+    usleep(1000);
+    la64m68_trace("pis: 68k released from reset (status now %04x)",
+                  reg_read(p, REG_STATUS));
+    return 0;
 }
 
 int la64m68_pis_status(la64m68_pis *p)
