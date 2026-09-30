@@ -1131,6 +1131,125 @@ static void test_ram_management(void)
     printf("test_core: ram management ok\n");
 }
 
+/* VERTB. The guest drives its display setup from the vertical blank, so this
+ * event decides whether we ever see anything. Two properties matter: it must
+ * arrive, and it must NOT interrupt when INTENA keeps it masked -- an
+ * unmasked source is an interrupt storm. */
+static void test_vaga_vertb(void)
+{
+    la64m68_vaga v;
+    la64m68_vaga_init(&v);
+
+    /* masked: the request latches but no level is raised */
+    v.regs[LA64M68_VAGA_REG_INTENA / 2] = 0;
+    for (int i = 0; i < 20; i++)
+        la64m68_vaga_tick(&v, 40000);
+    assert((v.intreq & (1u << 5)) != 0);        /* VERTB did happen */
+    assert(la64m68_vaga_ipl(&v) == 0);          /* but cannot interrupt */
+
+    /* enabled: level 3 (COPER/VERTB/BLIT group) */
+    la64m68_vaga_init(&v);
+    v.regs[LA64M68_VAGA_REG_INTENA / 2] = (uint16_t)(1u << 5);
+    for (int i = 0; i < 20; i++)
+        la64m68_vaga_tick(&v, 40000);
+    assert(la64m68_vaga_ipl(&v) == 3);
+
+    /* exactly one event per frame, not one per tick */
+    la64m68_vaga_init(&v);
+    v.regs[LA64M68_VAGA_REG_INTENA / 2] = (uint16_t)(1u << 5);
+    la64m68_vaga_tick(&v, 1000);
+    assert(la64m68_vaga_ipl(&v) == 0);          /* inside the frame: nothing */
+    la64m68_vaga_tick(&v, 709379);
+    assert(la64m68_vaga_ipl(&v) == 3);          /* frame boundary: VERTB */
+
+    printf("test_core: vaga vertb ok\n");
+}
+
+/* Blitter completion. The guest starts a blit and waits for the BLIT
+ * interrupt; without it Kickstart sits there forever before it ever enables
+ * the display. */
+static void test_vaga_blitter(void)
+{
+    la64m68_memory *mem = la64m68_ram_memory_create(0, 0x10000);
+    assert(mem);
+    la64m68_vaga v;
+    la64m68_vaga_init(&v);
+    la64m68_vaga_set_mem(&v, mem);
+
+    /* BLIT enabled in INTENA */
+    v.regs[LA64M68_VAGA_REG_INTENA / 2] = (uint16_t)(1u << 6);
+
+    /* a blit is started by writing BLTSIZE: 4x8 words */
+    v.regs[LA64M68_VAGA_REG_BLTSIZE / 2] = (uint16_t)((8u << 6) | 4u);
+    /* driven through the register window so the write path is exercised */
+    la64m68_memory *regs = la64m68_vaga_memory(&v);
+    assert(regs);
+    la64m68_mem_write16(regs, LA64M68_VAGA_BASE + LA64M68_VAGA_REG_BLTSIZE,
+                        (uint16_t)((8u << 6) | 4u));
+
+    assert(la64m68_vaga_ipl(&v) == 0);          /* not done yet */
+    la64m68_vaga_tick(&v, 100000);              /* far more than the blit costs */
+    assert(la64m68_vaga_ipl(&v) == 3);          /* BLIT group is level 3 */
+    assert((v.intreq & (1u << 6)) != 0);        /* BLIT latched */
+
+    /* a second blit must fire again, not stay stuck on the first */
+    v.intreq = 0;
+    la64m68_mem_write16(regs, LA64M68_VAGA_BASE + LA64M68_VAGA_REG_BLTSIZE,
+                        (uint16_t)((2u << 6) | 2u));
+    la64m68_vaga_tick(&v, 100000);
+    assert((v.intreq & (1u << 6)) != 0);
+
+    la64m68_vaga_mem_destroy(regs);
+    la64m68_ram_memory_destroy(mem);
+    printf("test_core: vaga blitter ok\n");
+}
+
+/* The copper. This is the link between "Kickstart runs" and "we see
+ * something": the Amiga sets BPLCON0, DIWSTRT and the colours through the
+ * copper list, not through direct CPU writes. A MOVE that lands on the wrong
+ * register leaves the display off while everything else looks healthy. */
+static void test_vaga_copper(void)
+{
+    la64m68_memory *mem = la64m68_ram_memory_create(0, 0x100000);
+    assert(mem);
+    la64m68_vaga v;
+    la64m68_vaga_init(&v);
+    la64m68_vaga_set_mem(&v, mem);
+    la64m68_memory *regs = la64m68_vaga_memory(&v);
+    assert(regs);
+
+    /* list at 0x40000:
+     *   MOVE BPLCON0 (0x100) <- 0x1200   word1 = offset with bit0 clear
+     *   MOVE DIWSTRT (0x08e) <- 0x2c81
+     *   WAIT forever                     ends the list                     */
+    la64m68_mem_write16(mem, 0x40000, 0x0100);
+    la64m68_mem_write16(mem, 0x40002, 0x1200);
+    la64m68_mem_write16(mem, 0x40004, 0x008e);
+    la64m68_mem_write16(mem, 0x40006, 0x2c81);
+    la64m68_mem_write16(mem, 0x40008, 0xfffd);   /* VP=ff HP=fe, bit0=1 WAIT */
+    la64m68_mem_write16(mem, 0x4000a, 0x0000);
+
+    /* point COP1LC at the list and stroke COPJMP1 */
+    la64m68_mem_write16(regs, LA64M68_VAGA_BASE + LA64M68_VAGA_REG_COP1LCH, 0x0004);
+    la64m68_mem_write16(regs, LA64M68_VAGA_BASE + LA64M68_VAGA_REG_COP1LCL, 0x0000);
+    la64m68_mem_write16(regs, LA64M68_VAGA_BASE + LA64M68_VAGA_REG_COPJMP1, 0x0000);
+
+    la64m68_vaga_tick(&v, 4000);
+
+    /* the whole point: BPLCON0 now carries a depth, so the decoder has a
+     * display to work with */
+    assert(v.regs[LA64M68_VAGA_REG_BPLCON0 / 2] == 0x1200);
+    assert(v.regs[0x08e / 2] == 0x2c81);
+    assert((v.regs[LA64M68_VAGA_REG_BPLCON0 / 2] >> 12) & 7);   /* depth != 0 */
+
+    /* the list must have ended, not still be running */
+    assert(v.cop_active == 0);
+
+    la64m68_vaga_mem_destroy(regs);
+    la64m68_ram_memory_destroy(mem);
+    printf("test_core: vaga copper ok\n");
+}
+
 int main(void)
 {
     test_reset_step();
@@ -1151,6 +1270,9 @@ int main(void)
     test_vfs_names();
     test_vaga_render();
     test_ram_management();
+    test_vaga_vertb();
+    test_vaga_blitter();
+    test_vaga_copper();
     printf("test_core: all ok\n");
     return 0;
 }
